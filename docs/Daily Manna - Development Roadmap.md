@@ -56,7 +56,7 @@ This document outlines a prioritized, iterative development approach for Daily M
 - [ ] Set up secure session management with Keychain
 - [ ] Create authentication state management
 
-### Epic 0.3: Core Data Models & Local Storage
+### Epic 0.3: Swift Data Models & Local Storage
 **Priority**: Critical
 **Estimated Effort**: 1 week
 **Goal**: Establish local-first data foundation with SwiftData
