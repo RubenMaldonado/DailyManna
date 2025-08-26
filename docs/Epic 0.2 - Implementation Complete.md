@@ -35,6 +35,7 @@
   - `SupabaseTasksRepository` and `SupabaseLabelsRepository`
   - Data Transfer Objects (DTOs) for clean API boundaries
   - Error handling and logging integration
+  - Global OAuth redirect configured via `AuthClient.Configuration.redirectToURL`
 
 ### ✅ Implement Sign in with Apple
 - **Status**: Complete - Native iOS/macOS implementation
@@ -43,6 +44,7 @@
   - `AppleSignInDelegate` for credential handling
   - Cross-platform compatibility (iOS/macOS)
   - Proper error handling and user feedback
+  - Secure nonce flow (hashed nonce in request, raw nonce to Supabase)
 
 ### ✅ Implement Google OAuth
 - **Status**: Complete - Web-based OAuth flow
@@ -50,6 +52,10 @@
   - Google OAuth integration through Supabase
   - Seamless authentication flow
   - Provider configuration ready
+  - iOS custom URL scheme callback: `com.rubentena.DailyManna://auth-callback`
+  - Supabase Auth → URL Configuration → Additional redirect URL updated
+  - `AuthenticationService.signInWithGoogle` passes explicit `redirectTo`
+  - UX freeze fix for missing redirect URL (fatal error) resolved
 
 ### ✅ Set up secure session management with Keychain
 - **Status**: Complete - Enterprise-grade security
@@ -180,7 +186,7 @@ CREATE POLICY "tasks_own_data" ON tasks
 - ✅ **Type Safety**: Strong Swift typing throughout
 - ✅ **Testability**: Dependency injection enables unit testing
 - ✅ **Modularity**: Clear separation of concerns
-- ✅ **Documentation**: Comprehensive setup guides
+- ✅ **Documentation**: Comprehensive setup guides (updated with Google OAuth iOS redirect steps and troubleshooting)
 
 ## 📋 **Next Epic Ready**
 
@@ -213,6 +219,25 @@ Epic 0.2 provides the foundation for:
 **Daily Manna now has enterprise-grade authentication and backend infrastructure ready for scaling to thousands of users!** 🚀
 
 ---
+
+## 🏷️ Releases and Verification
+
+### Tags created
+- `v0.2.0-apple-siwa`: Apple Sign in working with Supabase
+- `v0.2.1-google-oauth`: Google OAuth working (iOS redirect URL configured + docs)
+
+### Repository
+- GitHub: [RubenMaldonado/DailyManna](https://github.com/RubenMaldonado/DailyManna)
+
+### Manual Verification Performed
+- Apple SIWA flow completes and session is established in Supabase
+- Google OAuth flow completes and returns via custom URL scheme
+- Session restored on app launch from Keychain
+
+### Notable Fixes Implemented
+- Resolved fatal redirect URL error by configuring global and explicit `redirectTo`
+- Fixed nonce handling for Apple SIWA to avoid double prompts and token mismatches
+- Hardened user profile trigger and RLS policy creation in SQL
 
 ## 📚 **Implementation Files Created**
 
