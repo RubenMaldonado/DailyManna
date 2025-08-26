@@ -15,6 +15,7 @@
 * **`updated_at` – TIMESTAMPTZ** – Timestamp of last profile update (added for completeness if profile info can change).
 
 * *Removed `password_hash`:* Authentication is handled by external providers (Sign in with Apple/Google via Supabase Auth) and not stored in the app schema.
+* Trigger: `handle_new_user()` inserts a row into `public.users` when a new `auth.users` row is created (idempotent; `ON CONFLICT DO NOTHING`).
 
 **Rationale:** Using a UUID for `id` enables consistency with Supabase’s user IDs and avoids relying on auto-increment IDs. This is important for syncing across devices – clients can generate their own user (and other entity) IDs without collisions. The password hash is dropped because authentication is external; we only keep minimal profile info (email, name) in this table.
 
@@ -52,7 +53,7 @@
 
 * `created_at` – TIMESTAMPTZ (default NOW()) – Timestamp when the task was created.
 
-* **`updated_at` – TIMESTAMPTZ** (auto-updated) – Timestamp of the last modification to this task. (Added to support sync; this is automatically updated on every insert/update. Used by the sync engine to fetch changed tasks since the last sync.)
+* **`updated_at` – TIMESTAMPTZ** (auto-updated) – Timestamp of the last modification to this task. (Added to support sync; this is automatically updated on every insert/update via `touch_updated_at()` trigger. Used by the sync engine to fetch changed tasks since the last sync.)
 
 * **`deleted_at` – TIMESTAMPTZ, nullable** – Timestamp of logical deletion. (Added as a *tombstone* marker for deletions. Instead of hard-deleting tasks, setting this field indicates the task was deleted, which allows other devices to sync the deletion and hide or purge the task. A non-NULL `deleted_at` means the task is considered deleted and can be filtered out in queries.)
 
@@ -84,7 +85,7 @@ Additionally, an index on `parent_task_id` is recommended to quickly query sub-t
 
 * **`created_at` – TIMESTAMPTZ** – Timestamp when the label was created.
 
-* **`updated_at` – TIMESTAMPTZ** – Timestamp of the last update to the label (if the label’s name or color is edited).
+* **`updated_at` – TIMESTAMPTZ** – Timestamp of the last update to the label (if the label’s name or color is edited). Consider a similar `touch_updated_at()` trigger.
 
 * **`deleted_at` – TIMESTAMPTZ, nullable** – Timestamp if the label was deleted. (Like tasks, labels can be logically deleted to sync label removals. When a label is “deleted,” we mark this field and keep the row for sync purposes.)
 
@@ -148,7 +149,7 @@ To ensure the schema performs well and supports offline sync and filtering, we a
 
 All user-specific tables have RLS policies to enforce that each user can only access their own data. In a Supabase (Postgres) context, we enable RLS and add policies such as:
 
-* **Tasks/Labels:** `user_id = auth.uid()` for SELECT/UPDATE/DELETE, ensuring isolation per user. Inserts must likewise require the inserting user’s ID to match `auth.uid()`. Moreover, deletion operations should be handled via setting `deleted_at` (and the policy can require that field to be non-null for a “delete” operation to be considered, as noted in the architecture).
+* **Tasks/Labels:** `user_id = auth.uid()` for SELECT/UPDATE/DELETE, ensuring isolation per user. Inserts must likewise require the inserting user’s ID to match `auth.uid()`. Deletion operations should be handled via setting `deleted_at`.
 
 * **TaskLabels:** If we include `user_id`, the policy is similarly `user_id = auth.uid()`. If not, we write a composite policy that joins to ensure both the associated task and label belong to the user performing the action. For instance, the policy can allow a SELECT on task\_labels only if the corresponding task’s user\_id is `auth.uid()` (and similarly for label) – this ensures users only see tag links for their own items.
 
@@ -158,7 +159,8 @@ These RLS rules uphold privacy by design: no user can ever access another user�
 
 To support the real-time sync and conflict resolution strategy, we incorporate some triggers and conventions:
 
-* **`updated_at` trigger:** A trigger on the Tasks (and possibly Labels) table automatically sets the `updated_at` to `NOW()` on every INSERT or UPDATE. This frees the client from managing this field and ensures any change bumps the timestamp for sync. The architecture suggests such a trigger for production robustness.
+* **`updated_at` trigger:** A trigger on the Tasks (and Labels if desired) table automatically sets the `updated_at` to `NOW()` on every INSERT or UPDATE. This frees the client from managing this field and ensures any change bumps the timestamp for sync. The architecture uses a `touch_updated_at()` function + triggers.
+* **User bootstrap trigger:** `public.handle_new_user()` bound to `auth.users` creates the `public.users` row and avoids race conditions; uses `SECURITY DEFINER`, `SET search_path = public`.
 
 * **Cascade delete trigger (optional):** If using logical deletes, we implement an *on-delete trigger* or procedure to handle sub-task and tag cleanup. For example, when a task is marked deleted (setting `deleted_at`), an optional trigger could propagate that tombstone to its sub-tasks automatically (or we rely on ON DELETE CASCADE if a task is hard-deleted, though in Phase-1 we prefer soft deletes). This ensures no dangling subtasks when a parent is removed. Similarly, if a label is deleted, we could auto-remove its TaskLabel entries. These measures keep the data model consistent without requiring the client to remember to clean up related entities.
 
