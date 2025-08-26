@@ -447,6 +447,53 @@ Then run: `node generate-jwt.js`
    - **Client Secret**: Use the **Web application** Client Secret (from step 9.8)
 5. **Click "Save"**
 
+#### 9.9.1: Configure iOS Redirect URL (Required for native OAuth)
+
+To return from the browser back into the app during Google OAuth, we use a custom URL scheme. Configure both the app and Supabase:
+
+1. In Xcode: Targets → DailyManna → Info → URL Types
+   - **URL Schemes**: `com.rubentena.DailyManna`
+   - **Role**: Editor
+2. In Supabase Dashboard: Authentication → URL Configuration
+   - Under **Additional redirect URLs**, add: `com.rubentena.DailyManna://auth-callback`
+3. In code, set a global redirect URL when creating the Supabase client:
+   
+   ```swift
+   // DailyManna/Core/Auth/SupabaseConfig.swift
+   final class SupabaseConfig {
+       static let shared = SupabaseConfig()
+
+       // Custom scheme callback. Matches URL Type and Supabase Additional redirect URL
+       lazy var redirectToURL: URL = {
+           let bundleId = Bundle.main.bundleIdentifier ?? "com.rubentena.DailyManna"
+           return URL(string: "\(bundleId)://auth-callback")!
+       }()
+
+       lazy var client: SupabaseClient = {
+           // ... load SUPABASE_URL and SUPABASE_ANON_KEY ...
+           return SupabaseClient(
+               supabaseURL: URL(string: url)!,
+               supabaseKey: anonKey,
+               options: .init(auth: .init(redirectToURL: redirectToURL))
+           )
+       }()
+   }
+   ```
+
+4. When starting Google sign-in, also pass the same redirect URL explicitly:
+
+   ```swift
+   // DailyManna/Core/Auth/AuthenticationService.swift
+   func signInWithGoogle() async throws {
+       authState = .authenticating
+       let redirectURL = SupabaseConfig.shared.redirectToURL
+       _ = try await client.auth.signInWithOAuth(
+           provider: .google,
+           redirectTo: redirectURL
+       )
+   }
+   ```
+
 ### 9.10: Test Authentication
 
 1. **Build and run your app** (`Cmd+R` in Xcode)
@@ -471,6 +518,10 @@ Then run: `node generate-jwt.js`
 - **"Invalid client"**: Use the Web application Client ID, not iOS
 - **"Redirect URI mismatch"**: Check the callback URLs in Google Console
 - **"API not enabled"**: Ensure Google+ API is enabled
+- **Fatal error: provide a valid redirect URL (AuthClient.Configuration.redirectToURL)**:
+  - Add URL Type with scheme `com.rubentena.DailyManna` in Xcode
+  - Add `com.rubentena.DailyManna://auth-callback` under Supabase → Auth → URL Configuration → Additional redirect URLs
+  - Ensure the app sets `redirectToURL` and passes it to `signInWithOAuth(.google, redirectTo:)`
 
 #### General Issues:
 - **Build errors**: Make sure Supabase Swift package is added to your target
