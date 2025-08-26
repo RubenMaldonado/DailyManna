@@ -11,6 +11,15 @@ import Supabase
 final class SupabaseConfig {
     static let shared = SupabaseConfig()
     
+    // Redirect URL used by ASWebAuthenticationSession to return to the app.
+    // We default to a custom scheme based on the app bundle identifier.
+    // Make sure this scheme is registered under URL Types in the app target settings.
+    lazy var redirectToURL: URL = {
+        let bundleId = Bundle.main.bundleIdentifier ?? "com.rubentena.DailyManna"
+        // Callback path can be any constant string; it must match the value you add in Supabase Auth > URL Configuration > Additional Redirect URLs
+        return URL(string: "\(bundleId)://auth-callback")!
+    }()
+    
     lazy var client: SupabaseClient = {
         guard let path = Bundle.main.path(forResource: "Supabase-Config", ofType: "plist"),
               let plist = NSDictionary(contentsOfFile: path),
@@ -21,7 +30,13 @@ final class SupabaseConfig {
         
         return SupabaseClient(
             supabaseURL: URL(string: url)!,
-            supabaseKey: anonKey
+            supabaseKey: anonKey,
+            options: .init(
+                auth: .init(
+                    // Provide a global redirect URL so OAuth calls work without passing redirectTo each time
+                    redirectToURL: redirectToURL
+                )
+            )
         )
     }()
     

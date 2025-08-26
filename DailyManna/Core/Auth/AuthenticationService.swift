@@ -138,7 +138,12 @@ final class AuthenticationService: ObservableObject {
     func signInWithGoogle() async throws {
         authState = .authenticating
         do {
-            _ = try await client.auth.signInWithOAuth(provider: .google)
+            // Pass explicit redirect URL to avoid runtime fatal error when none is configured
+            let redirectURL = SupabaseConfig.shared.redirectToURL
+            _ = try await client.auth.signInWithOAuth(
+                provider: .google,
+                redirectTo: redirectURL
+            )
             Logger.shared.info("Google OAuth initiated successfully", category: .auth)
         } catch {
             Logger.shared.error("Google OAuth failed", category: .auth, error: error)
