@@ -33,7 +33,8 @@ final class DataContainer {
         let schema = Schema([
             TaskEntity.self,
             LabelEntity.self,
-            TaskLabelEntity.self
+            TaskLabelEntity.self,
+            TimeBucketEntity.self
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         
@@ -44,6 +45,30 @@ final class DataContainer {
         }
         
         let modelContext = ModelContext(modelContainer)
+        // Set merge policy to favor in-memory changes (local-first), conflict resolution handled at sync boundaries
+        modelContext.autosaveEnabled = true
+        // Seed fixed time buckets idempotently
+        do {
+            let bucketDescriptor = FetchDescriptor<TimeBucketEntity>()
+            let existing = try modelContext.fetch(bucketDescriptor)
+            if existing.isEmpty {
+                let buckets: [(String, String)] = [
+                    (TimeBucket.thisWeek.rawValue, TimeBucket.thisWeek.displayName),
+                    (TimeBucket.weekend.rawValue, TimeBucket.weekend.displayName),
+                    (TimeBucket.nextWeek.rawValue, TimeBucket.nextWeek.displayName),
+                    (TimeBucket.nextMonth.rawValue, TimeBucket.nextMonth.displayName),
+                    (TimeBucket.routines.rawValue, TimeBucket.routines.displayName)
+                ]
+                for (key, name) in buckets {
+                    modelContext.insert(TimeBucketEntity(key: key, name: name))
+                }
+                try modelContext.save()
+            }
+        } catch {
+            // Seeding is best-effort; ignore if model not available
+        }
+        // Run lightweight data migrations (idempotent)
+        DataMigration.runMigrations(modelContext: modelContext)
         // Initialize repositories
         self._tasksRepository = SwiftDataTasksRepository(modelContext: modelContext)
         self._labelsRepository = SwiftDataLabelsRepository(modelContext: modelContext)
@@ -70,6 +95,8 @@ final class DataContainer {
         }
         
         let modelContext = ModelContext(modelContainer)
+        modelContext.autosaveEnabled = true
+        // No legacy cleanup in test containers unless specifically needed
         // Initialize repositories
         self._tasksRepository = SwiftDataTasksRepository(modelContext: modelContext)
         self._labelsRepository = SwiftDataLabelsRepository(modelContext: modelContext)

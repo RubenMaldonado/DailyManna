@@ -14,6 +14,9 @@ final class TaskListViewModel: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var errorMessage: String? = nil
     @Published var isSyncing: Bool = false
+    @Published var selectedBucket: TimeBucket = .thisWeek
+    @Published var bucketCounts: [TimeBucket: Int] = [:]
+    @Published var showCompleted: Bool = false
     
     private let taskUseCases: TaskUseCases
     private let labelUseCases: LabelUseCases
@@ -48,6 +51,34 @@ final class TaskListViewModel: ObservableObject {
             Logger.shared.error("Failed to fetch tasks", category: .ui, error: error)
         }
         isLoading = false
+    }
+
+    func select(bucket: TimeBucket) {
+        selectedBucket = bucket
+        _Concurrency.Task { [weak self] in
+            guard let self else { return }
+            async let _ = self.fetchTasks(in: bucket)
+            async let _ = self.refreshCounts()
+            _ = await ()
+        }
+    }
+
+    func refreshCounts() async {
+        var counts: [TimeBucket: Int] = [:]
+        await withTaskGroup(of: (TimeBucket, Int).self) { group in
+            for bucket in TimeBucket.allCases.sorted(by: { $0.sortOrder < $1.sortOrder }) {
+                group.addTask { [userId, taskUseCases, showCompleted] in
+                    let count = (try? await taskUseCases.countTasks(for: userId, in: bucket, includeCompleted: showCompleted)) ?? 0
+                    return (bucket, count)
+                }
+            }
+            for await (bucket, count) in group {
+                counts[bucket] = count
+            }
+        }
+        await MainActor.run {
+            self.bucketCounts = counts
+        }
     }
     
     func toggleTaskCompletion(task: Task) async {

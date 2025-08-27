@@ -100,4 +100,10 @@ public final class TaskUseCases {
         let subTasks = try await tasksRepository.fetchSubTasks(for: parentTaskId)
         return subTasks.filter { !$0.isDeleted }
     }
+
+    // MARK: - Counts
+    /// Returns the number of tasks in a specific bucket for the user. Excludes completed by default.
+    public func countTasks(for userId: UUID, in bucket: TimeBucket, includeCompleted: Bool = false) async throws -> Int {
+        try await tasksRepository.countTasks(for: userId, in: bucket, includeCompleted: includeCompleted)
+    }
 }

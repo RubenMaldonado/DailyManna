@@ -14,6 +14,7 @@ struct TaskListView: View {
     @StateObject private var viewModel: TaskListViewModel
     private let userId: UUID
     @EnvironmentObject private var authService: AuthenticationService
+    @State private var newTaskTitle: String = ""
     
     init(viewModel: TaskListViewModel, userId: UUID) {
         _viewModel = StateObject(wrappedValue: viewModel)
@@ -21,91 +22,101 @@ struct TaskListView: View {
     }
     
     var body: some View {
-        VStack(spacing: 20) {
-            // Header
-            Text("Daily Manna")
-                .font(.largeTitle)
-                .fontWeight(.bold)
-                .foregroundColor(Colors.primary)
+        VStack(spacing: 16) {
+            // Top chrome: account + bucket picker
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Daily Manna").style(Typography.title2).foregroundColor(Colors.onSurface)
+                    Text("Signed in").style(Typography.caption).foregroundColor(Colors.success)
+                }
+                Spacer()
+                Button("Sign out") { _Concurrency.Task { try? await authService.signOut() } }
+                    .buttonStyle(.bordered)
+            }
+            .padding(.horizontal)
             
-            Text("Epic 0.1: Architecture Demo")
-                .font(.subheadline)
-                .foregroundColor(Colors.onSurfaceVariant)
-            
-            Divider()
+            Picker("Bucket", selection: $viewModel.selectedBucket) {
+                ForEach(TimeBucket.allCases.sorted { $0.sortOrder < $1.sortOrder }) { bucket in
+                    Text(bucket.displayName).tag(bucket)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .onChange(of: viewModel.selectedBucket) { _, newValue in
+                viewModel.select(bucket: newValue)
+            }
 
-            // Session banner
-            VStack(spacing: 8) {
-                Text("Signed in")
-                    .font(.headline)
-                    .foregroundColor(Colors.success)
-                Text("User ID: \(userId.uuidString)")
-                    .font(.caption)
-                    .foregroundColor(Colors.onSurfaceVariant)
-                Button("Sign out") {
-                    _Concurrency.Task { try? await authService.signOut() }
-                }
-                .buttonStyle(.bordered)
-            }
-            .padding()
-            .background(Colors.surface)
-            .cornerRadius(12)
-            
-            // Architecture Status
-            VStack(alignment: .leading, spacing: 12) {
-                ArchitectureStatusRow(title: "✅ Domain Layer", subtitle: "Models, Use Cases, Repositories")
-                ArchitectureStatusRow(title: "✅ Data Layer", subtitle: "SwiftData, Repository Implementations")
-                ArchitectureStatusRow(title: "✅ Design System", subtitle: "Colors, Typography, Components")
-                ArchitectureStatusRow(title: "✅ Features Layer", subtitle: "ViewModels, Views")
-                ArchitectureStatusRow(title: "✅ Dependency Injection", subtitle: "Clean Architecture Setup")
-                ArchitectureStatusRow(title: "✅ Error Handling", subtitle: "Logging & Error Management")
-            }
-            .padding()
-            .background(Colors.surface)
-            .cornerRadius(12)
-            
-            Spacer()
-            
-            // Simple Task Demo
-            VStack(spacing: 16) {
-                Text("Task System Test")
-                    .font(.headline)
-                
-                if viewModel.isLoading {
-                    ProgressView("Testing architecture...")
-                        .foregroundColor(Colors.primary)
-                } else if let errorMessage = viewModel.errorMessage {
-                    Text("❌ Error: \(errorMessage)")
-                        .foregroundColor(Colors.error)
-                        .multilineTextAlignment(.center)
-                } else {
-                    Text("✅ Architecture working!")
-                        .foregroundColor(Colors.success)
-                        .font(.title2)
-                    
-                    Text("Found \(viewModel.tasksWithLabels.count) tasks")
-                        .foregroundColor(Colors.onSurfaceVariant)
-                }
-                
-                Button("Test Architecture") {
-                    _Concurrency.Task {
-                        await viewModel.fetchTasks()
-                    }
+            BucketHeader(bucket: viewModel.selectedBucket,
+                         count: viewModel.bucketCounts[viewModel.selectedBucket] ?? 0)
+            .padding(.horizontal)
+
+            // Quick Add composer
+            HStack(spacing: 8) {
+                TextField("Add a task…", text: $newTaskTitle)
+                    .textFieldStyle(.roundedBorder)
+                    .submitLabel(.done)
+                    .onSubmit { addCurrentTask() }
+                Button {
+                    addCurrentTask()
+                } label: {
+                    Text("Add")
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Colors.primary)
+                .disabled(newTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            .padding()
-            .background(Colors.surface)
-            .cornerRadius(12)
-            
-            Spacer()
+            .padding(.horizontal)
+
+            if viewModel.isLoading {
+                ProgressView("Loading...")
+                    .foregroundColor(Colors.primary)
+                    .padding()
+            } else if let errorMessage = viewModel.errorMessage {
+                Text("❌ Error: \(errorMessage)")
+                    .foregroundColor(Colors.error)
+                    .multilineTextAlignment(.center)
+                    .padding()
+            } else if viewModel.tasksWithLabels.isEmpty {
+                VStack(spacing: 8) {
+                    Text("No tasks in \(viewModel.selectedBucket.displayName)").style(Typography.body)
+                    Text("Add a task to get started").style(Typography.caption).foregroundColor(Colors.onSurfaceVariant)
+                }
+                .padding()
+                .frame(maxWidth: .infinity)
+                .background(Colors.surface)
+                .cornerRadius(12)
+                .padding(.horizontal)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(viewModel.tasksWithLabels, id: \.0.id) { pair in
+                            TaskCard(task: pair.0, labels: pair.1) {
+                                _Concurrency.Task { await viewModel.toggleTaskCompletion(task: pair.0) }
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+            }
+            Spacer(minLength: 0)
         }
-        .padding()
         .background(Colors.background)
         .task {
-            await viewModel.fetchTasks()
+            await viewModel.refreshCounts()
+            await viewModel.fetchTasks(in: viewModel.selectedBucket)
         }
+    }
+}
+
+private extension TaskListView {
+    func addCurrentTask() {
+        let title = newTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+        _Concurrency.Task {
+            await viewModel.addTask(title: title, description: nil, bucket: viewModel.selectedBucket)
+            await viewModel.refreshCounts()
+        }
+        newTaskTitle = ""
     }
 }
 

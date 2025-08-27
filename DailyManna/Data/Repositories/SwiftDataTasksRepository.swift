@@ -9,7 +9,7 @@ import Foundation
 import SwiftData
 
 /// SwiftData implementation of TasksRepository
-final class SwiftDataTasksRepository: TasksRepository {
+actor SwiftDataTasksRepository: TasksRepository {
     private let modelContext: ModelContext
     
     init(modelContext: ModelContext) {
@@ -36,9 +36,10 @@ final class SwiftDataTasksRepository: TasksRepository {
     }
     
     func fetchTask(by id: UUID) async throws -> Task? {
+        // Return task regardless of soft-delete state; callers can inspect deletedAt
         let descriptor = FetchDescriptor<TaskEntity>(
             predicate: #Predicate<TaskEntity> { entity in
-                entity.id == id && entity.deletedAt == nil
+                entity.id == id
             }
         )
         let entity = try modelContext.fetch(descriptor).first
@@ -46,6 +47,7 @@ final class SwiftDataTasksRepository: TasksRepository {
     }
     
     func createTask(_ task: Task) async throws {
+        // Preserve provided updatedAt (e.g., from remote); local callers should set appropriately
         let entity = TaskEntity(from: task)
         modelContext.insert(entity)
         try modelContext.save()
@@ -60,6 +62,7 @@ final class SwiftDataTasksRepository: TasksRepository {
         guard let entity = try modelContext.fetch(descriptor).first else {
             throw DataError.notFound("Task with ID \(task.id) not found for update.")
         }
+        // Do not override updatedAt; callers (use-cases or sync) must set it
         entity.update(from: task)
         try modelContext.save()
     }
@@ -80,15 +83,18 @@ final class SwiftDataTasksRepository: TasksRepository {
     }
     
     func purgeDeletedTasks(olderThan date: Date) async throws {
+        // Fetch soft-deleted tasks, then compare dates in-memory to avoid optional unwrap in predicate
         let descriptor = FetchDescriptor<TaskEntity>(
             predicate: #Predicate<TaskEntity> { entity in
-                entity.deletedAt != nil && entity.deletedAt! < date
+                entity.deletedAt != nil
             }
         )
-        let entitiesToPurge = try modelContext.fetch(descriptor)
-        for entity in entitiesToPurge {
-            modelContext.delete(entity)
+        let entities = try modelContext.fetch(descriptor)
+        let entitiesToPurge = entities.filter { ent in
+            if let deletedAt = ent.deletedAt { return deletedAt < date }
+            return false
         }
+        for entity in entitiesToPurge { modelContext.delete(entity) }
         try modelContext.save()
     }
     
@@ -100,5 +106,18 @@ final class SwiftDataTasksRepository: TasksRepository {
         )
         let entities = try modelContext.fetch(descriptor)
         return entities.map { $0.toDomainModel() }
+    }
+
+    func countTasks(for userId: UUID, in bucket: TimeBucket, includeCompleted: Bool) async throws -> Int {
+        var predicate = #Predicate<TaskEntity> { entity in
+            entity.userId == userId && entity.bucketKey == bucket.rawValue && entity.deletedAt == nil
+        }
+        if includeCompleted == false {
+            predicate = #Predicate<TaskEntity> { entity in
+                entity.userId == userId && entity.bucketKey == bucket.rawValue && entity.deletedAt == nil && entity.isCompleted == false
+            }
+        }
+        let descriptor = FetchDescriptor<TaskEntity>(predicate: predicate)
+        return try modelContext.fetch(descriptor).count
     }
 }

@@ -9,7 +9,7 @@ import Foundation
 import SwiftData
 
 /// SwiftData implementation of LabelsRepository
-final class SwiftDataLabelsRepository: LabelsRepository {
+actor SwiftDataLabelsRepository: LabelsRepository {
     private let modelContext: ModelContext
     
     init(modelContext: ModelContext) {
@@ -27,9 +27,10 @@ final class SwiftDataLabelsRepository: LabelsRepository {
     }
     
     func fetchLabel(by id: UUID) async throws -> Label? {
+        // Return label regardless of soft-delete state for caller inspection
         let descriptor = FetchDescriptor<LabelEntity>(
             predicate: #Predicate<LabelEntity> { entity in
-                entity.id == id && entity.deletedAt == nil
+                entity.id == id
             }
         )
         let entity = try modelContext.fetch(descriptor).first
@@ -73,13 +74,15 @@ final class SwiftDataLabelsRepository: LabelsRepository {
     func purgeDeletedLabels(olderThan date: Date) async throws {
         let descriptor = FetchDescriptor<LabelEntity>(
             predicate: #Predicate<LabelEntity> { entity in
-                entity.deletedAt != nil && entity.deletedAt! < date
+                entity.deletedAt != nil
             }
         )
-        let entitiesToPurge = try modelContext.fetch(descriptor)
-        for entity in entitiesToPurge {
-            modelContext.delete(entity)
+        let entities = try modelContext.fetch(descriptor)
+        let entitiesToPurge = entities.filter { ent in
+            if let deletedAt = ent.deletedAt { return deletedAt < date }
+            return false
         }
+        for entity in entitiesToPurge { modelContext.delete(entity) }
         try modelContext.save()
     }
     
@@ -132,6 +135,10 @@ final class SwiftDataLabelsRepository: LabelsRepository {
         
         let taskLabelEntity = TaskLabelEntity(taskId: taskId, labelId: labelId, userId: userId)
         modelContext.insert(taskLabelEntity)
+        // Bump task.updatedAt when labels change
+        if let task = try modelContext.fetch(FetchDescriptor<TaskEntity>(predicate: #Predicate<TaskEntity> { $0.id == taskId })).first {
+            task.updatedAt = Date()
+        }
         try modelContext.save()
     }
     
@@ -143,6 +150,10 @@ final class SwiftDataLabelsRepository: LabelsRepository {
         )
         if let entity = try modelContext.fetch(descriptor).first {
             modelContext.delete(entity)
+            // Bump task.updatedAt when labels change
+            if let task = try modelContext.fetch(FetchDescriptor<TaskEntity>(predicate: #Predicate<TaskEntity> { $0.id == taskId })).first {
+                task.updatedAt = Date()
+            }
             try modelContext.save()
         }
     }

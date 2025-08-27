@@ -29,4 +29,7 @@ public protocol TasksRepository: Sendable {
     
     /// Fetches sub-tasks for a given parent task
     func fetchSubTasks(for parentTaskId: UUID) async throws -> [Task]
+
+    /// Counts tasks for a user and bucket. Excludes completed by default.
+    func countTasks(for userId: UUID, in bucket: TimeBucket, includeCompleted: Bool) async throws -> Int
 }
