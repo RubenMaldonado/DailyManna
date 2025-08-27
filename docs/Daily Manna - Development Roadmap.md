@@ -16,7 +16,7 @@ This document outlines a prioritized, iterative development approach for Daily M
 
 ## Phase 0: Foundation & Infrastructure (Weeks 1-3)
 
-### Epic 0.1: Project Architecture Setup
+### Epic 0.1: Project Architecture Setup | COMPLETED
 **Priority**: Critical
 **Estimated Effort**: 1 week
 **Goal**: Establish scalable, maintainable codebase structure
@@ -36,7 +36,7 @@ This document outlines a prioritized, iterative development approach for Daily M
 - [ ] Set up dependency injection container
 - [ ] Create basic logging and error handling infrastructure
 
-### Epic 0.2: Supabase Integration & Authentication
+### Epic 0.2: Supabase Integration & Authentication | COMPLETED
 **Priority**: Critical
 **Estimated Effort**: 1.5 weeks
 **Goal**: Connect app to Supabase backend with secure authentication
@@ -56,7 +56,7 @@ This document outlines a prioritized, iterative development approach for Daily M
 - [ ] Set up secure session management with Keychain
 - [ ] Create authentication state management
 
-### Epic 0.3: Swift Data Models & Local Storage
+### Epic 0.3: Swift Data Models & Local Storage | COMPLETED
 **Priority**: Critical
 **Estimated Effort**: 1 week
 **Goal**: Establish local-first data foundation with SwiftData
@@ -66,20 +66,20 @@ This document outlines a prioritized, iterative development approach for Daily M
 - As a user, my app should work offline and sync when connected
 
 **Acceptance Criteria**:
-- [ ] Replace existing `Item` model with proper domain models:
+- [x] Replace existing `Item` model with proper domain models:
   - `Task` model with all required fields
   - `Label` model
   - `TimeBucket` model (seeded data)
-- [ ] Implement SwiftData migrations strategy
-- [ ] Add sync metadata fields (remoteID, updatedAt, deletedAt)
-- [ ] Create basic repository implementations for local storage
-- [ ] Implement UUID generation for offline-first approach
+- [x] Implement SwiftData migrations strategy
+- [x] Add sync metadata fields (remoteID, updatedAt, deletedAt)
+- [x] Create basic repository implementations for local storage
+- [x] Implement UUID generation for offline-first approach
 
 ---
 
 ## Phase 1: Core MVP - Essential Task Management (Weeks 4-8)
 
-### Epic 1.1: Time Buckets Foundation
+### Epic 1.1: Time Buckets Foundation | COMPLETED
 **Priority**: High
 **Estimated Effort**: 1 week
 **Goal**: Implement the core organizational structure of Daily Manna
@@ -90,13 +90,13 @@ This document outlines a prioritized, iterative development approach for Daily M
 - As a user, I understand which bucket is for what timeframe
 
 **Acceptance Criteria**:
-- [ ] Create TimeBucket enum with five fixed values
-- [ ] Implement bucket-based navigation UI
-- [ ] Design bucket header components with counts
-- [ ] Seed database with fixed bucket data
-- [ ] Create basic bucket selection UI
+- [x] Create TimeBucket enum with five fixed values
+- [x] Implement bucket-based navigation UI
+- [x] Design bucket header components with counts
+- [x] Seed database with fixed bucket data
+- [x] Create basic bucket selection UI
 
-### Epic 1.2: Basic Task CRUD Operations
+### Epic 1.2: Basic Task CRUD Operations | COMPLETED
 **Priority**: High
 **Estimated Effort**: 2 weeks
 **Goal**: Users can create, read, update, and delete tasks
@@ -109,13 +109,13 @@ This document outlines a prioritized, iterative development approach for Daily M
 - As a user, I can move tasks between buckets
 
 **Acceptance Criteria**:
-- [ ] Implement task creation form with bucket selection
-- [ ] Create task list view showing tasks by bucket
-- [ ] Add task editing capabilities
-- [ ] Implement task completion with visual feedback
-- [ ] Add task deletion with confirmation
-- [ ] Enable drag-and-drop between buckets (iOS/macOS appropriate)
-- [ ] Add basic task details (title, description, due date)
+- [x] Implement task creation form with bucket selection
+- [x] Create task list view showing tasks by bucket
+- [x] Add task editing capabilities
+- [x] Implement task completion with visual feedback
+- [x] Add task deletion with confirmation
+- [x] Enable drag-and-drop between buckets (iOS/macOS appropriate)
+- [x] Add basic task details (title, description, due date)
 
 ### Epic 1.3: Basic Sync Implementation
 **Priority**: High
