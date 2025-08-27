@@ -38,7 +38,12 @@ actor SwiftDataLabelsRepository: LabelsRepository {
     }
     
     func createLabel(_ label: Label) async throws {
-        let entity = LabelEntity(from: label)
+        var local = label
+        if local.remoteId == nil {
+            local.needsSync = true
+            local.updatedAt = Date()
+        }
+        let entity = LabelEntity(from: local)
         modelContext.insert(entity)
         try modelContext.save()
     }
@@ -52,7 +57,12 @@ actor SwiftDataLabelsRepository: LabelsRepository {
         guard let entity = try modelContext.fetch(descriptor).first else {
             throw DataError.notFound("Label with ID \(label.id) not found for update.")
         }
-        entity.update(from: label)
+        var local = label
+        if local.remoteId == nil || local.needsSync {
+            local.needsSync = true
+            local.updatedAt = Date()
+        }
+        entity.update(from: local)
         try modelContext.save()
     }
     
@@ -65,9 +75,10 @@ actor SwiftDataLabelsRepository: LabelsRepository {
         guard let entity = try modelContext.fetch(descriptor).first else {
             throw DataError.notFound("Label with ID \(id) not found for deletion.")
         }
-        // Perform soft delete
+        // Perform soft delete and mark for sync
         entity.deletedAt = Date()
         entity.updatedAt = Date()
+        entity.needsSync = true
         try modelContext.save()
     }
     
@@ -156,5 +167,25 @@ actor SwiftDataLabelsRepository: LabelsRepository {
             }
             try modelContext.save()
         }
+    }
+
+    func fetchLabelsNeedingSync(for userId: UUID) async throws -> [Label] {
+        let descriptor = FetchDescriptor<LabelEntity>(
+            predicate: #Predicate<LabelEntity> { entity in
+                entity.userId == userId && entity.needsSync == true
+            }
+        )
+        let entities = try modelContext.fetch(descriptor)
+        return entities.map { $0.toDomainModel() }
+    }
+    
+    func deleteAll(for userId: UUID) async throws {
+        // Delete task-label associations for user
+        let junctions = try modelContext.fetch(FetchDescriptor<TaskLabelEntity>(predicate: #Predicate<TaskLabelEntity> { $0.userId == userId }))
+        for j in junctions { modelContext.delete(j) }
+        // Delete labels for user
+        let labels = try modelContext.fetch(FetchDescriptor<LabelEntity>(predicate: #Predicate<LabelEntity> { $0.userId == userId }))
+        for l in labels { modelContext.delete(l) }
+        try modelContext.save()
     }
 }

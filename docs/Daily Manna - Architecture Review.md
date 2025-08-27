@@ -42,11 +42,11 @@ SwiftUI Views (iOS/macOS) — Pure SwiftUI, Custom Design System
 Domain Layer (Task, Label, Bucket; pure Swift)  
        │  
 Repositories (protocols)  
- ├─ SwiftDataRepository (local authoritative store)  
- └─ RemoteRepository (Supabase transport: Tasks, Labels, Users)  
+├─ SwiftDataRepository (local authoritative store)  
+└─ RemoteRepository (Supabase transport: Tasks, Labels, Users)  
        │  
- Sync Orchestrator (Keychain-backed session; periodic + realtime)  
- (pull, push, realtime)  
+Sync Orchestrator (Keychain-backed session; initial + activation + periodic + realtime)  
+(push, delta pull with overlap, realtime hooks)  
        │  
 Supabase (Postgres + RLS + Realtime + Auth)
 
@@ -56,7 +56,7 @@ Design notes:
 * **Local-first UX**: SwiftData is the on-device truth for rendering; the server is the system-of-record for persistence/sharing.  
 * **Repository + Adapter pattern** isolates Supabase. A second adapter can target Liquid Glass later with no UI/domain changes.  
 * **Dependency Injection**: Clean architecture with DI container for testability and modularity.
-* **Sync Orchestrator** performs delta pulls, pushes, applies Realtime diffs, and observes auth state to scope sync per user.
+* **Sync Orchestrator** performs pushes and delta pulls (with ~120s overlap), observes auth state/scene activation to trigger sync, persists per-user checkpoints, and exposes realtime hooks.
 * **Auth Integration**: Centralized `AuthenticationService` uses Supabase Auth; sessions stored in Keychain.
 * **OAuth Redirect**: Global `AuthClient.Configuration.redirectToURL` and explicit `redirectTo` passed for Google OAuth.
 
@@ -105,20 +105,21 @@ Based on your schema with production-grade tweaks (UUID/ULID, timestamps, tombst
 
 ## **Pull (delta)**
 
-* At app start and on schedule: SELECT * FROM tasks WHERE updated_at > last_sync OR deleted_at IS NOT NULL AND user_id = auth.uid().  
-* Apply to SwiftData: upserts; purge items with deleted_at set.
+* At initial/activation/periodic/realtime-hint: select rows where `updated_at >= (last_checkpoint - 120s)` for the user.  
+* Set checkpoint to max server `updated_at` observed in the batch.  
+* Apply to SwiftData: upserts; respect tombstones (`deleted_at`).
 
 ## **Push**
 
-* Local pending mutations queue.  
-* Upsert rows with client-generated id; server assigns updated_at.  
-* If server returns a newer updated_at, last-write-wins (LWW) for scalar fields; label sets merge (union).
+* Local pending mutations via `needsSync` flags.  
+* Upsert rows with client-generated id; server assigns authoritative `updated_at`.  
+* If server returns a newer `updated_at`, last-write-wins (LWW) for scalar fields; label sets merge (union).
 
 ## **Realtime**
 
-* Subscribe to Postgres Changes for tasks, labels, task_labels filtered by user_id.  
-* Apply incoming changes to SwiftData for instant cross-device updates.
-* Periodic delta sync (Timer) complements realtime to heal missed events.
+* Tables added to the `supabase_realtime` publication (Studio: Database → Replication → Publications).  
+* App starts realtime hooks in foreground; events coalesce to a debounced delta pull.  
+* Periodic delta sync complements realtime to heal missed events.
 
 ## **Conflict Rules**
 

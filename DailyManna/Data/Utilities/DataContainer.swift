@@ -28,13 +28,15 @@ final class DataContainer {
     let modelContainer: ModelContainer
     private let _tasksRepository: SwiftDataTasksRepository
     private let _labelsRepository: SwiftDataLabelsRepository
+    private let _syncStateStore: SyncStateStore
     
     init() throws {
         let schema = Schema([
             TaskEntity.self,
             LabelEntity.self,
             TaskLabelEntity.self,
-            TimeBucketEntity.self
+            TimeBucketEntity.self,
+            SyncStateEntity.self
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         
@@ -72,6 +74,7 @@ final class DataContainer {
         // Initialize repositories
         self._tasksRepository = SwiftDataTasksRepository(modelContext: modelContext)
         self._labelsRepository = SwiftDataLabelsRepository(modelContext: modelContext)
+        self._syncStateStore = SyncStateStore(modelContext: modelContext)
     }
     
     /// Private initializer for test containers
@@ -79,7 +82,8 @@ final class DataContainer {
         let schema = Schema([
             TaskEntity.self,
             LabelEntity.self,
-            TaskLabelEntity.self
+            TaskLabelEntity.self,
+            SyncStateEntity.self
         ])
         
         let modelConfiguration = ModelConfiguration(
@@ -100,6 +104,7 @@ final class DataContainer {
         // Initialize repositories
         self._tasksRepository = SwiftDataTasksRepository(modelContext: modelContext)
         self._labelsRepository = SwiftDataLabelsRepository(modelContext: modelContext)
+        self._syncStateStore = SyncStateStore(modelContext: modelContext)
     }
     
     /// Creates a test container with in-memory storage
@@ -115,5 +120,9 @@ final class DataContainer {
     
     var labelsRepository: LabelsRepository {
         return _labelsRepository
+    }
+    
+    var syncStateStore: SyncStateStore {
+        return _syncStateStore
     }
 }

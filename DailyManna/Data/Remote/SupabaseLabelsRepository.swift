@@ -97,4 +97,22 @@ final class SupabaseLabelsRepository: RemoteLabelsRepository {
         Logger.shared.info("Synced \(syncedLabels.count) labels", category: .data)
         return syncedLabels
     }
+    
+    // MARK: - Realtime (no-op baseline)
+    func startRealtime(userId: UUID) async throws {
+        Logger.shared.info("Realtime start requested for labels (user: \(userId))", category: .data)
+    }
+    
+    func stopRealtime() async {
+        Logger.shared.info("Realtime stop requested for labels", category: .data)
+    }
+    
+    func deleteAll(for userId: UUID) async throws {
+        try await client
+            .from("labels")
+            .update(["deleted_at": Date().ISO8601Format()])
+            .eq("user_id", value: userId.uuidString)
+            .execute()
+        Logger.shared.info("Bulk deleted labels remotely for user: \(userId)", category: .data)
+    }
 }

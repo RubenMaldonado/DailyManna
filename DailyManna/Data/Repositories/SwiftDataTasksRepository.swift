@@ -47,8 +47,14 @@ actor SwiftDataTasksRepository: TasksRepository {
     }
     
     func createTask(_ task: Task) async throws {
-        // Preserve provided updatedAt (e.g., from remote); local callers should set appropriately
-        let entity = TaskEntity(from: task)
+        var local = task
+        // If this is a local create (no remoteId), mark for sync and bump timestamp.
+        if local.remoteId == nil {
+            local.needsSync = true
+            local.updatedAt = Date()
+        }
+        // If coming from remote (remoteId present), preserve server timestamps and flags.
+        let entity = TaskEntity(from: local)
         modelContext.insert(entity)
         try modelContext.save()
     }
@@ -62,8 +68,13 @@ actor SwiftDataTasksRepository: TasksRepository {
         guard let entity = try modelContext.fetch(descriptor).first else {
             throw DataError.notFound("Task with ID \(task.id) not found for update.")
         }
-        // Do not override updatedAt; callers (use-cases or sync) must set it
-        entity.update(from: task)
+        var local = task
+        // For local updates (no remoteId or explicitly flagged), mark for sync and bump timestamp
+        if local.remoteId == nil || local.needsSync {
+            local.needsSync = true
+            local.updatedAt = Date()
+        }
+        entity.update(from: local)
         try modelContext.save()
     }
     
@@ -76,9 +87,10 @@ actor SwiftDataTasksRepository: TasksRepository {
         guard let entity = try modelContext.fetch(descriptor).first else {
             throw DataError.notFound("Task with ID \(id) not found for deletion.")
         }
-        // Perform soft delete
+        // Perform soft delete and mark for sync
         entity.deletedAt = Date()
         entity.updatedAt = Date()
+        entity.needsSync = true
         try modelContext.save()
     }
     
@@ -119,5 +131,25 @@ actor SwiftDataTasksRepository: TasksRepository {
         }
         let descriptor = FetchDescriptor<TaskEntity>(predicate: predicate)
         return try modelContext.fetch(descriptor).count
+    }
+
+    func fetchTasksNeedingSync(for userId: UUID) async throws -> [Task] {
+        let descriptor = FetchDescriptor<TaskEntity>(
+            predicate: #Predicate<TaskEntity> { entity in
+                entity.userId == userId && entity.needsSync == true
+            }
+        )
+        let entities = try modelContext.fetch(descriptor)
+        return entities.map { $0.toDomainModel() }
+    }
+    
+    func deleteAll(for userId: UUID) async throws {
+        // Delete task-label associations for user
+        let junctions = try modelContext.fetch(FetchDescriptor<TaskLabelEntity>(predicate: #Predicate<TaskLabelEntity> { $0.userId == userId }))
+        for j in junctions { modelContext.delete(j) }
+        // Delete tasks for user
+        let tasks = try modelContext.fetch(FetchDescriptor<TaskEntity>(predicate: #Predicate<TaskEntity> { $0.userId == userId }))
+        for t in tasks { modelContext.delete(t) }
+        try modelContext.save()
     }
 }

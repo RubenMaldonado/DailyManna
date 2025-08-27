@@ -56,12 +56,18 @@ public final class TaskUseCases {
     
     /// Creates a new task
     public func createTask(_ task: Task) async throws {
-        try await tasksRepository.createTask(task)
+        var local = task
+        local.updatedAt = Date()
+        local.needsSync = true
+        try await tasksRepository.createTask(local)
     }
     
     /// Updates an existing task
     public func updateTask(_ task: Task) async throws {
-        try await tasksRepository.updateTask(task)
+        var updated = task
+        updated.updatedAt = Date()
+        updated.needsSync = true
+        try await tasksRepository.updateTask(updated)
     }
     
     /// Marks a task as completed or incomplete
@@ -72,6 +78,7 @@ public final class TaskUseCases {
         task.isCompleted.toggle()
         task.completedAt = task.isCompleted ? Date() : nil
         task.updatedAt = Date()
+        task.needsSync = true
         try await tasksRepository.updateTask(task)
     }
     
@@ -82,6 +89,7 @@ public final class TaskUseCases {
         }
         task.bucketKey = newBucket
         task.updatedAt = Date()
+        task.needsSync = true
         try await tasksRepository.updateTask(task)
     }
     
@@ -92,6 +100,7 @@ public final class TaskUseCases {
         }
         task.deletedAt = Date()
         task.updatedAt = Date()
+        task.needsSync = true
         try await tasksRepository.updateTask(task)
     }
     

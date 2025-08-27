@@ -32,4 +32,10 @@ public protocol TasksRepository: Sendable {
 
     /// Counts tasks for a user and bucket. Excludes completed by default.
     func countTasks(for userId: UUID, in bucket: TimeBucket, includeCompleted: Bool) async throws -> Int
+    
+    /// Fetches tasks that are marked as needing sync for push
+    func fetchTasksNeedingSync(for userId: UUID) async throws -> [Task]
+    
+    /// Deletes all data for a user (local-only)
+    func deleteAll(for userId: UUID) async throws
 }

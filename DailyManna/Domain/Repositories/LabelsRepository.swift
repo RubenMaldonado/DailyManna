@@ -38,4 +38,10 @@ public protocol LabelsRepository: Sendable {
     
     /// Dissociates a label from a task
     func removeLabel(_ labelId: UUID, from taskId: UUID, for userId: UUID) async throws
+    
+    /// Fetches labels that are marked as needing sync for push
+    func fetchLabelsNeedingSync(for userId: UUID) async throws -> [Label]
+    
+    /// Deletes all labels and associations for a user (local-only)
+    func deleteAll(for userId: UUID) async throws
 }

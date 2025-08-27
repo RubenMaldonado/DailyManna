@@ -13,4 +13,9 @@ protocol RemoteLabelsRepository {
     func updateLabel(_ label: Label) async throws -> Label
     func deleteLabel(id: UUID) async throws
     func syncLabels(_ labels: [Label]) async throws -> [Label]
+    // Realtime hooks (no-op for now)
+    func startRealtime(userId: UUID) async throws
+    func stopRealtime() async
+    /// Bulk soft-delete all user labels remotely (testing convenience)
+    func deleteAll(for userId: UUID) async throws
 }

@@ -37,12 +37,18 @@ public final class LabelUseCases {
     
     /// Creates a new label
     public func createLabel(_ label: Label) async throws {
-        try await labelsRepository.createLabel(label)
+        var local = label
+        local.updatedAt = Date()
+        local.needsSync = true
+        try await labelsRepository.createLabel(local)
     }
     
     /// Updates an existing label
     public func updateLabel(_ label: Label) async throws {
-        try await labelsRepository.updateLabel(label)
+        var updated = label
+        updated.updatedAt = Date()
+        updated.needsSync = true
+        try await labelsRepository.updateLabel(updated)
     }
     
     /// Soft deletes a label
@@ -52,6 +58,7 @@ public final class LabelUseCases {
         }
         label.deletedAt = Date()
         label.updatedAt = Date()
+        label.needsSync = true
         try await labelsRepository.updateLabel(label)
     }
     

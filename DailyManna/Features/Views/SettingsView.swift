@@ -1,0 +1,138 @@
+//
+//  SettingsView.swift
+//  DailyManna
+//
+//  Debug/testing utilities: bulk delete and sample data generation
+//
+
+import SwiftUI
+
+@MainActor
+final class SettingsViewModel: ObservableObject {
+    @Published var isWorking: Bool = false
+    @Published var statusMessage: String? = nil
+    
+    private let tasksRepository: TasksRepository
+    private let labelsRepository: LabelsRepository
+    private let remoteTasksRepository: RemoteTasksRepository
+    private let remoteLabelsRepository: RemoteLabelsRepository
+    private let syncService: SyncService
+    private let userId: UUID
+    
+    init(tasksRepository: TasksRepository,
+         labelsRepository: LabelsRepository,
+         remoteTasksRepository: RemoteTasksRepository,
+         remoteLabelsRepository: RemoteLabelsRepository,
+         syncService: SyncService,
+         userId: UUID) {
+        self.tasksRepository = tasksRepository
+        self.labelsRepository = labelsRepository
+        self.remoteTasksRepository = remoteTasksRepository
+        self.remoteLabelsRepository = remoteLabelsRepository
+        self.syncService = syncService
+        self.userId = userId
+    }
+    
+    func deleteAllData() async {
+        guard !isWorking else { return }
+        isWorking = true
+        statusMessage = "Deleting…"
+        do {
+            // Local
+            try await labelsRepository.deleteAll(for: userId)
+            try await tasksRepository.deleteAll(for: userId)
+            // Remote (soft-delete)
+            try await remoteLabelsRepository.deleteAll(for: userId)
+            try await remoteTasksRepository.deleteAll(for: userId)
+            // Sync to reconcile
+            await syncService.sync(for: userId)
+            statusMessage = "All data deleted"
+        } catch {
+            statusMessage = "Failed: \(error.localizedDescription)"
+        }
+        isWorking = false
+    }
+    
+    func generateSamples() async {
+        guard !isWorking else { return }
+        isWorking = true
+        statusMessage = "Generating…"
+        do {
+            let device = currentDeviceName()
+            let now = Date()
+            let formatter = DateFormatter()
+            formatter.dateStyle = .short
+            formatter.timeStyle = .short
+            let stamp = formatter.string(from: now)
+            
+            for bucket in TimeBucket.allCases {
+                let t = Task(
+                    userId: userId,
+                    bucketKey: bucket,
+                    title: "Sample (\(device)) @ \(stamp)",
+                    description: Bool.random() ? "Debug seed" : nil,
+                    dueAt: Bool.random() ? Calendar.current.date(byAdding: .day, value: Int.random(in: 0...7), to: now) : nil,
+                    recurrenceRule: nil,
+                    isCompleted: false
+                )
+                // Local create; will be marked needsSync by use cases/repo
+                try await tasksRepository.createTask(t)
+            }
+            // Kick a sync
+            await syncService.sync(for: userId)
+            statusMessage = "Samples created"
+        } catch {
+            statusMessage = "Failed: \(error.localizedDescription)"
+        }
+        isWorking = false
+    }
+    
+    private func currentDeviceName() -> String {
+        #if os(iOS)
+        return "iOS"
+        #else
+        return "macOS"
+        #endif
+    }
+}
+
+struct SettingsView: View {
+    @StateObject var viewModel: SettingsViewModel
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Danger Zone") {
+                    Button(role: .destructive) {
+                        _Concurrency.Task { await viewModel.deleteAllData() }
+                    } label: {
+                        Text("Delete ALL data (local + Supabase)")
+                    }
+                    .disabled(viewModel.isWorking)
+                }
+                Section("Generators") {
+                    Button {
+                        _Concurrency.Task { await viewModel.generateSamples() }
+                    } label: {
+                        Text("Generate sample tasks (one per bucket)")
+                    }
+                    .disabled(viewModel.isWorking)
+                }
+                if let status = viewModel.statusMessage {
+                    Section("Status") { Text(status) }
+                }
+            }
+            .navigationTitle("Settings")
+            .toolbar {
+                #if os(iOS)
+                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+                #else
+                ToolbarItem(placement: .automatic) { Button("Done") { dismiss() } }
+                #endif
+            }
+        }
+    }
+}
+
+

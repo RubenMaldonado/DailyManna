@@ -18,17 +18,20 @@ final class SyncService: ObservableObject {
     private let remoteTasksRepository: RemoteTasksRepository
     private let localLabelsRepository: LabelsRepository
     private let remoteLabelsRepository: RemoteLabelsRepository
+    private let syncStateStore: SyncStateStore
     
     init(
         localTasksRepository: TasksRepository,
         remoteTasksRepository: RemoteTasksRepository,
         localLabelsRepository: LabelsRepository,
-        remoteLabelsRepository: RemoteLabelsRepository
+        remoteLabelsRepository: RemoteLabelsRepository,
+        syncStateStore: SyncStateStore
     ) {
         self.localTasksRepository = localTasksRepository
         self.remoteTasksRepository = remoteTasksRepository
         self.localLabelsRepository = localLabelsRepository
         self.remoteLabelsRepository = remoteLabelsRepository
+        self.syncStateStore = syncStateStore
     }
     
     private var periodicCancellable: AnyCancellable?
@@ -47,10 +50,16 @@ final class SyncService: ObservableObject {
             Logger.shared.info("Starting sync operation", category: .sync)
             
             // Sync tasks
-            try await syncTasks(userId: userId)
+            try await withRetry { [weak self] in
+                guard let self else { return }
+                try await self.syncTasks(userId: userId)
+            }
             
             // Sync labels
-            try await syncLabels(userId: userId)
+            try await withRetry { [weak self] in
+                guard let self else { return }
+                try await self.syncLabels(userId: userId)
+            }
             
             lastSyncDate = Date()
             Logger.shared.info("Sync completed successfully", category: .sync)
@@ -65,9 +74,12 @@ final class SyncService: ObservableObject {
     
     /// Syncs tasks bidirectionally
     private func syncTasks(userId: UUID) async throws {
+        // Resolve checkpoints
+        let checkpoints = try await syncStateStore.loadSnapshot(userId: userId)
+        
         // 1. Push local changes to remote
-        let localTasks = try await localTasksRepository.fetchTasks(for: userId, in: nil)
-        let tasksNeedingSync = localTasks.filter { $0.needsSync }
+        // Prefer targeted fetch for items needing sync
+        let tasksNeedingSync = (try? await localTasksRepository.fetchTasksNeedingSync(for: userId)) ?? []
         
         if !tasksNeedingSync.isEmpty {
             Logger.shared.info("Pushing \(tasksNeedingSync.count) local task changes", category: .sync)
@@ -81,8 +93,18 @@ final class SyncService: ObservableObject {
             }
         }
         
-        // 2. Pull remote changes
-        let remoteTasks = try await remoteTasksRepository.fetchTasks(since: lastSyncDate)
+        // 2. Pull remote changes (delta)
+        // Determine if local store is empty to bootstrap with full sync
+        let localAll = try await localTasksRepository.fetchTasks(for: userId, in: nil)
+        let isColdStart = localAll.isEmpty
+        // Add small overlap to heal clock skew or missed events
+        let sinceBase = checkpoints?.lastTasksSyncAt ?? lastSyncDate
+        let since = isColdStart ? nil : sinceBase?.addingTimeInterval(-120)
+        var remoteTasks = try await remoteTasksRepository.fetchTasks(since: since)
+        // Fallback: if we expected deltas but got nothing on an empty store, fetch all
+        if remoteTasks.isEmpty && isColdStart && since != nil {
+            remoteTasks = try await remoteTasksRepository.fetchTasks(since: nil)
+        }
         
         if !remoteTasks.isEmpty {
             Logger.shared.info("Pulling \(remoteTasks.count) remote task changes", category: .sync)
@@ -108,13 +130,20 @@ final class SyncService: ObservableObject {
                 }
             }
         }
+        // Update checkpoint using server-sourced timestamps to avoid device clock skew
+        if let maxServerUpdated = remoteTasks.map({ $0.updatedAt }).max() {
+            try await syncStateStore.updateTasksCheckpoint(userId: userId, to: maxServerUpdated)
+        }
     }
     
     /// Syncs labels bidirectionally
     private func syncLabels(userId: UUID) async throws {
+        // Resolve checkpoints
+        let checkpoints = try await syncStateStore.loadSnapshot(userId: userId)
+        
         // 1. Push local changes to remote
-        let localLabels = try await localLabelsRepository.fetchLabels(for: userId)
-        let labelsNeedingSync = localLabels.filter { $0.needsSync }
+        // Prefer targeted fetch for items needing sync
+        let labelsNeedingSync = (try? await localLabelsRepository.fetchLabelsNeedingSync(for: userId)) ?? []
         
         if !labelsNeedingSync.isEmpty {
             Logger.shared.info("Pushing \(labelsNeedingSync.count) local label changes", category: .sync)
@@ -128,8 +157,16 @@ final class SyncService: ObservableObject {
             }
         }
         
-        // 2. Pull remote changes
-        let remoteLabels = try await remoteLabelsRepository.fetchLabels(since: lastSyncDate)
+        // 2. Pull remote changes (delta)
+        // Bootstrap labels as well if local store has none
+        let localLabelsAll = try await localLabelsRepository.fetchLabels(for: userId)
+        let isColdStartLabels = localLabelsAll.isEmpty
+        let sinceBaseL = checkpoints?.lastLabelsSyncAt ?? lastSyncDate
+        let sinceL = isColdStartLabels ? nil : sinceBaseL?.addingTimeInterval(-120)
+        var remoteLabels = try await remoteLabelsRepository.fetchLabels(since: sinceL)
+        if remoteLabels.isEmpty && isColdStartLabels && sinceL != nil {
+            remoteLabels = try await remoteLabelsRepository.fetchLabels(since: nil)
+        }
         
         if !remoteLabels.isEmpty {
             Logger.shared.info("Pulling \(remoteLabels.count) remote label changes", category: .sync)
@@ -155,11 +192,17 @@ final class SyncService: ObservableObject {
                 }
             }
         }
+        if let maxServerUpdated = remoteLabels.map({ $0.updatedAt }).max() {
+            try await syncStateStore.updateLabelsCheckpoint(userId: userId, to: maxServerUpdated)
+        }
     }
     
     /// Performs initial sync for a user
     func performInitialSync(for userId: UUID) async {
         Logger.shared.info("Performing initial sync", category: .sync)
+        // Start realtime (no-op stubs in Epic 1.3)
+        try? await remoteTasksRepository.startRealtime(userId: userId)
+        try? await remoteLabelsRepository.startRealtime(userId: userId)
         await sync(for: userId)
     }
     
@@ -172,5 +215,27 @@ final class SyncService: ObservableObject {
                 guard let self else { return }
                 _Concurrency.Task { await self.sync(for: userId) }
             }
+    }
+    
+    // MARK: - Retry helper
+    private func withRetry(_ operation: @escaping () async throws -> Void) async throws {
+        let maxAttempts = 5
+        var attempt = 0
+        var lastError: Error?
+        while attempt < maxAttempts {
+            do {
+                try await operation()
+                return
+            } catch {
+                lastError = error
+                attempt += 1
+                let backoff = min(pow(2.0, Double(attempt)), 30.0)
+                let jitter = Double.random(in: 0...0.3)
+                let delay = backoff + jitter
+                Logger.shared.error("Retrying sync phase (attempt #\(attempt)) in \(String(format: "%.1f", delay))s", category: .sync, error: error)
+                try? await _Concurrency.Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            }
+        }
+        throw lastError ?? NSError(domain: "Sync", code: -1)
     }
 }

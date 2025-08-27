@@ -78,6 +78,7 @@ final class Dependencies {
         registerSingleton(type: DataContainer.self) { dataContainer }
         registerSingleton(type: TasksRepository.self) { dataContainer.tasksRepository }
         registerSingleton(type: LabelsRepository.self) { dataContainer.labelsRepository }
+        registerSingleton(type: SyncStateStore.self) { dataContainer.syncStateStore }
         
         // Remote Repositories
         registerSingleton(type: RemoteTasksRepository.self) { SupabaseTasksRepository() }
@@ -89,7 +90,8 @@ final class Dependencies {
                 localTasksRepository: try! self.resolve(type: TasksRepository.self),
                 remoteTasksRepository: try! self.resolve(type: RemoteTasksRepository.self),
                 localLabelsRepository: try! self.resolve(type: LabelsRepository.self),
-                remoteLabelsRepository: try! self.resolve(type: RemoteLabelsRepository.self)
+                remoteLabelsRepository: try! self.resolve(type: RemoteLabelsRepository.self),
+                syncStateStore: try! self.resolve(type: SyncStateStore.self)
             )
         }
         

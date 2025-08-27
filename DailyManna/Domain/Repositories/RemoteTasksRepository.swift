@@ -14,4 +14,9 @@ protocol RemoteTasksRepository {
     func deleteTask(id: UUID) async throws
     func fetchTasksForBucket(_ bucketKey: String) async throws -> [Task]
     func syncTasks(_ tasks: [Task]) async throws -> [Task]
+    // Realtime hooks (no-op for now)
+    func startRealtime(userId: UUID) async throws
+    func stopRealtime() async
+    /// Bulk soft-delete all user tasks remotely (testing convenience)
+    func deleteAll(for userId: UUID) async throws
 }

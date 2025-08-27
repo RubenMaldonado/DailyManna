@@ -17,6 +17,9 @@ final class TaskListViewModel: ObservableObject {
     @Published var selectedBucket: TimeBucket = .thisWeek
     @Published var bucketCounts: [TimeBucket: Int] = [:]
     @Published var showCompleted: Bool = false
+    @Published var isPresentingTaskForm: Bool = false
+    @Published var editingTask: Task? = nil
+    @Published var pendingDelete: Task? = nil
     
     private let taskUseCases: TaskUseCases
     private let labelUseCases: LabelUseCases
@@ -36,6 +39,19 @@ final class TaskListViewModel: ObservableObject {
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] value in
                     self?.isSyncing = value
+                }
+                .store(in: &cancellables)
+            // Refresh lists whenever a sync cycle finishes successfully
+            syncService.$lastSyncDate
+                .removeDuplicates()
+                .compactMap { $0 }
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    guard let self else { return }
+                    _Concurrency.Task {
+                        await self.refreshCounts()
+                        await self.fetchTasks(in: self.selectedBucket)
+                    }
                 }
                 .store(in: &cancellables)
         }
@@ -85,18 +101,69 @@ final class TaskListViewModel: ObservableObject {
         do {
             try await taskUseCases.toggleTaskCompletion(id: task.id, userId: userId)
             // Re-fetch or update locally
-            await fetchTasks()
+            await refreshCounts()
+            await fetchTasks(in: selectedBucket)
         } catch {
             errorMessage = "Failed to toggle task completion: \(error.localizedDescription)"
             Logger.shared.error("Failed to toggle task completion", category: .ui, error: error)
         }
     }
     
+    func presentCreateForm() {
+        editingTask = nil
+        isPresentingTaskForm = true
+    }
+    
+    func presentEditForm(task: Task) {
+        editingTask = task
+        isPresentingTaskForm = true
+    }
+    
+    func save(draft: TaskDraft) async {
+        do {
+            if let editing = editingTask {
+                let updated = draft.applying(to: editing)
+                try await taskUseCases.updateTask(updated)
+            } else {
+                let newTask = draft.toNewTask()
+                try await taskUseCases.createTask(newTask)
+            }
+            await refreshCounts()
+            await fetchTasks(in: selectedBucket)
+        } catch {
+            errorMessage = "Failed to save task: \(error.localizedDescription)"
+            Logger.shared.error("Failed to save task", category: .ui, error: error)
+        }
+    }
+
+    func confirmDelete(_ task: Task) {
+        pendingDelete = task
+    }
+    
+    func performDelete() async {
+        guard let task = pendingDelete else { return }
+        pendingDelete = nil
+        await deleteTask(task: task)
+        await refreshCounts()
+    }
+    
+    func move(taskId: UUID, to bucket: TimeBucket) async {
+        do {
+            try await taskUseCases.moveTask(id: taskId, to: bucket, for: userId)
+            await refreshCounts()
+            await fetchTasks(in: selectedBucket)
+        } catch {
+            errorMessage = "Failed to move task: \(error.localizedDescription)"
+            Logger.shared.error("Failed to move task", category: .ui, error: error)
+        }
+    }
+
     func addTask(title: String, description: String?, bucket: TimeBucket) async {
         let newTask = Task(userId: userId, bucketKey: bucket, title: title, description: description)
         do {
             try await taskUseCases.createTask(newTask)
-            await fetchTasks()
+            await refreshCounts()
+            await fetchTasks(in: selectedBucket)
         } catch {
             errorMessage = "Failed to add task: \(error.localizedDescription)"
             Logger.shared.error("Failed to add task", category: .ui, error: error)
@@ -106,7 +173,8 @@ final class TaskListViewModel: ObservableObject {
     func deleteTask(task: Task) async {
         do {
             try await taskUseCases.deleteTask(by: task.id, for: userId)
-            await fetchTasks()
+            await refreshCounts()
+            await fetchTasks(in: selectedBucket)
         } catch {
             errorMessage = "Failed to delete task: \(error.localizedDescription)"
             Logger.shared.error("Failed to delete task", category: .ui, error: error)
@@ -121,10 +189,16 @@ final class TaskListViewModel: ObservableObject {
         
         await syncService.sync(for: userId)
         // Refresh tasks after sync
-        await fetchTasks()
+        await refreshCounts()
+        await fetchTasks(in: selectedBucket)
     }
     
     func startPeriodicSync() {
         syncService?.startPeriodicSync(for: userId)
+    }
+    
+    func initialSyncIfNeeded() async {
+        guard let syncService = syncService else { return }
+        await syncService.performInitialSync(for: userId)
     }
 }

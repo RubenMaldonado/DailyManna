@@ -111,4 +111,25 @@ final class SupabaseTasksRepository: RemoteTasksRepository {
         Logger.shared.info("Synced \(syncedTasks.count) tasks", category: .data)
         return syncedTasks
     }
+    
+    // MARK: - Realtime (no-op baseline)
+    func startRealtime(userId: UUID) async throws {
+        // In Epic 1.3 baseline, we enable Realtime at the table level in Studio.
+        // Here we could subscribe to postgres_changes. Left as no-op stub.
+        Logger.shared.info("Realtime start requested for tasks (user: \(userId))", category: .data)
+    }
+    
+    func stopRealtime() async {
+        Logger.shared.info("Realtime stop requested for tasks", category: .data)
+    }
+    
+    func deleteAll(for userId: UUID) async throws {
+        // Soft-delete all tasks by setting deleted_at where user_id matches
+        try await client
+            .from("tasks")
+            .update(["deleted_at": Date().ISO8601Format()])
+            .eq("user_id", value: userId.uuidString)
+            .execute()
+        Logger.shared.info("Bulk deleted tasks remotely for user: \(userId)", category: .data)
+    }
 }

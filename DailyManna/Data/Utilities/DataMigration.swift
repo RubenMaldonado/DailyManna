@@ -11,8 +11,7 @@ import SwiftData
 /// Runs idempotent, lightweight data migrations at startup
 enum DataMigration {
     static func runMigrations(modelContext: ModelContext) {
-        // Placeholder for future lightweight migrations
-        // Intentionally empty for now
+        // Placeholder: no-op migration. SyncStateEntity is added to schema; SwiftData handles lightweight migrations.
     }
 }
 
