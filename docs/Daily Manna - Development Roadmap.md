@@ -121,6 +121,7 @@ This document outlines a prioritized, iterative development approach for Daily M
 **Priority**: High
 **Estimated Effort**: 2 weeks
 **Goal**: Ensure data consistency across devices
+**Description**: Bidirectional sync with offline-first UX. Push local changes, pull deltas using server `updated_at` with a 120s overlap window, and persist per-user checkpoints. Triggers: initial sync after sign-in/first load, activation sync when the app becomes active, periodic sync every 60s while foregrounded, and foreground Realtime hints. Conflict resolution is last-write-wins by server time; deletions propagate via `deleted_at` tombstones. UI shows syncing status and auto-refreshes after completion. Debug-only Settings allow bulk delete (local + Supabase) and sample task generation for testing.
 
 **User Stories**:
 - As a user, changes I make on one device appear on my other devices
@@ -128,13 +129,16 @@ This document outlines a prioritized, iterative development approach for Daily M
 - As a user, I don't lose data due to sync conflicts
 
 **Acceptance Criteria**:
-- [x] Implement basic push/pull sync strategy
-- [x] Create sync orchestrator with delta queries
-- [x] Handle offline mutations queue
-- [x] Implement last-write-wins conflict resolution
-- [x] Add sync status indicators in UI
-- [x] Create retry logic for failed syncs
-- [x] Implement Supabase Realtime subscriptions
+- [x] Implement basic push/pull sync strategy (tasks and labels; tombstones via `deleted_at`)
+- [x] Create sync orchestrator with delta queries (`updated_at >= last_checkpoint - 120s`)
+- [x] Persist per-user checkpoints in local store (max server `updated_at`)
+- [x] Handle offline mutations queue (`needsSync` flags; local-first repos)
+- [x] Implement last-write-wins conflict resolution (server `updated_at` as source of truth)
+- [x] Add sync status indicators in UI and auto-refresh post-sync
+- [x] Create retry logic for failed syncs (exponential backoff with jitter)
+- [x] Implement initial, activation, and periodic (60s) sync triggers
+- [x] Enable Supabase Realtime via publication and foreground subscribe hooks
+- [x] Provide debug-only Settings for bulk delete and sample data generation
 
 ### Epic 1.4: Design System Implementation
 **Priority**: Medium-High
