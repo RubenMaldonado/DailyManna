@@ -17,16 +17,16 @@ struct Colors {
     static let secondary = Color.orange
     static let secondaryVariant = Color.orange.opacity(0.8)
     
-    // MARK: - Semantic Colors (SwiftUI-native)
-    static let background = Color.white
-    static let surface = Color.gray.opacity(0.05)
-    static let surfaceVariant = Color.gray.opacity(0.1)
+    // MARK: - Semantic Colors (adaptive via asset catalog)
+    static let background = Color("Background")
+    static let surface = Color("Surface")
+    static let surfaceVariant = Color("SurfaceVariant")
     
     // MARK: - Content Colors
     static let onPrimary = Color.white
     static let onSecondary = Color.white
-    static let onBackground = Color.black
-    static let onSurface = Color.black
+    static let onBackground = Color("OnSurface")
+    static let onSurface = Color("OnSurface")
     static let onSurfaceVariant = Color.gray
     
     // MARK: - Status Colors
@@ -70,4 +70,21 @@ struct Colors {
         case .routines: return routines
         }
     }
+
+    // MARK: - Label Color Palette (curated)
+    /// Curated, accessible label color hex values
+    static let labelPalette: [String] = [
+        "#EF4444", // red-500
+        "#F97316", // orange-500
+        "#EAB308", // yellow-500
+        "#22C55E", // green-500
+        "#06B6D4", // cyan-500
+        "#3B82F6", // blue-500
+        "#8B5CF6", // violet-500
+        "#EC4899", // pink-500
+        "#10B981", // emerald-500
+        "#F59E0B", // amber-500
+        "#0EA5E9", // sky-500
+        "#A855F7"  // purple-500
+    ]
 }

@@ -15,6 +15,8 @@ struct TaskFormView: View {
     let onCancel: () -> Void
     @State private var hasDueDate: Bool = false
     @State private var dueDate: Date = Date()
+    @EnvironmentObject private var authService: AuthenticationService
+    @State private var selectedLabels: Set<UUID> = []
     
     var body: some View {
         NavigationStack {
@@ -37,6 +39,9 @@ struct TaskFormView: View {
                         }
                     }
                 }
+                Section("Labels") {
+                    InlineTaskLabelSelector(userId: authService.currentUser?.id ?? draft.userId, selected: $selectedLabels)
+                }
             }
             .navigationTitle(isEditing ? "Edit Task" : "New Task")
             .toolbar {
@@ -47,6 +52,11 @@ struct TaskFormView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         draft.dueAt = hasDueDate ? dueDate : nil
+                        // Post selected label IDs so the view model can persist them
+                        NotificationCenter.default.post(name: Notification.Name("dm.taskform.labels.selection"), object: nil, userInfo: [
+                            "taskId": draft.id,
+                            "labelIds": Array(selectedLabels)
+                        ])
                         onSave(draft)
                         dismiss()
                     }
@@ -57,9 +67,16 @@ struct TaskFormView: View {
             .onAppear {
                 hasDueDate = draft.dueAt != nil
                 dueDate = draft.dueAt ?? Date()
+                _Concurrency.Task {
+                    let deps = Dependencies.shared
+                    if isEditing {
+                        if let (task, labels) = try? await TaskUseCases(tasksRepository: try! deps.resolve(type: TasksRepository.self), labelsRepository: try! deps.resolve(type: LabelsRepository.self)).fetchTaskWithLabels(by: draft.id) {
+                            _ = task
+                            selectedLabels = Set(labels.map { $0.id })
+                        }
+                    }
+                }
             }
         }
     }
 }
-
-

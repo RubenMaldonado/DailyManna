@@ -35,7 +35,9 @@
 
 * `user_id` – UUID (FK → Users.id) – Owner of the task. (Type changed from INT to UUID to align with the Users table/Supabase Auth ID. Used in row-level security policies to isolate user data.)
 
-* **`bucket_key` – TEXT** (FK → TimeBuckets.key) – Time bucket category to which this task belongs. (Replaces the numeric `bucket_id` with a stable text key. Ensures the task is in one of the five fixed buckets; e.g. a task can be in “THIS\_WEEK” or “ROUTINES”. A CHECK constraint enforces valid values if not using an explicit foreign key.)
+* **`bucket_key` – TEXT** (FK → TimeBuckets.key) – Time bucket category to which this task belongs. (Replaces the numeric `bucket_id` with a stable text key. Ensures the task is in one of the five fixed buckets; e.g. a task can be in “THIS_WEEK” or “ROUTINES”. A CHECK constraint enforces valid values if not using an explicit foreign key.)
+
+* **`position` – DOUBLE PRECISION** – Ordering key within a bucket for incomplete tasks. The client assigns values using midpoint insertion with an initial stride of 1024, allowing precise drag-and-drop without mass renumbering. New tasks are appended to the bottom (largest position). Completed tasks are rendered by `completed_at` DESC and do not participate in this ordering.
 
 * `parent_task_id` – UUID, nullable (FK → Tasks.id) – Reference to a parent task for sub-tasks. (`parent_task_id` remains for hierarchical tasks; now using UUID type. Allows tasks to have optional sub-tasks. If set, this task is a sub-task of another task.)
 
@@ -45,29 +47,31 @@
 
 * **`due_at` – TIMESTAMPTZ, nullable** – Specific due date and time for the task (renamed from `due_date` and stored with timezone precision. This allows tasks to have exact deadlines or reminder times in addition to their general bucket placement).
 
-* `recurrence_rule` – TEXT, nullable – Recurrence pattern or rule for repeating tasks (e.g. `"every Friday"`). Used primarily for tasks in the \#ROUTINES bucket to generate the next occurrence when one is completed. (Stored as free-form text or a standardized rule; allows natural-language input parsing in the future.)
+* `recurrence_rule` – TEXT, nullable – Recurrence pattern or rule for repeating tasks (e.g. "every Friday"). Used primarily for tasks in the #ROUTINES bucket to generate the next occurrence when one is completed. (Stored as free-form text or a standardized rule; allows natural-language input parsing in the future.)
 
 * `is_completed` – BOOLEAN (default FALSE) – Completion status of the task.
 
-* `completed_at` – TIMESTAMPTZ, nullable – Timestamp when the task was marked completed. (Populated when `is_completed` flips true, to track *when* it was done.)
+* `completed_at` – TIMESTAMPTZ, nullable – Timestamp when the task was marked completed. (Populated when `is_completed` flips true, to track when it was done.)
 
 * `created_at` – TIMESTAMPTZ (default NOW()) – Timestamp when the task was created.
 
 * **`updated_at` – TIMESTAMPTZ** (auto-updated) – Timestamp of the last modification to this task. (Added to support sync; this is automatically updated on every insert/update via `touch_updated_at()` trigger. Used by the sync engine to fetch changed tasks since the last sync.)
 
-* **`deleted_at` – TIMESTAMPTZ, nullable** – Timestamp of logical deletion. (Added as a *tombstone* marker for deletions. Instead of hard-deleting tasks, setting this field indicates the task was deleted, which allows other devices to sync the deletion and hide or purge the task. A non-NULL `deleted_at` means the task is considered deleted and can be filtered out in queries.)
+* **`deleted_at` – TIMESTAMPTZ, nullable** – Timestamp of logical deletion. (Added as a tombstone marker for deletions. Instead of hard-deleting tasks, setting this field indicates the task was deleted, which allows other devices to sync the deletion and hide or purge the task. A non-NULL `deleted_at` means the task is considered deleted and can be filtered out in queries.)
 
 **Rationale:** These changes ensure the **Tasks** table fully supports Daily Manna’s functionality and the robust sync requirements:
 
 * *Time Buckets:* Every task must belong to one fixed bucket. Using `bucket_key` directly in Tasks (with allowed values enforced) guarantees this relationship. This aligns with the design where tasks are always in “THIS WEEK”, “NEXT WEEK”, etc., and not in arbitrary user-created projects.
 
-* *Sub-Tasks:* The `parent_task_id` FK allows nesting tasks (one level deep) so that larger tasks can be broken down into smaller steps. This recursion via self-reference keeps the schema normalized (no separate sub-task table needed) while fulfilling the feature of sub-tasks in the product. We ensure that if a parent task is deleted, its sub-tasks are also removed or marked deleted to avoid orphaned subtasks (implemented via **ON DELETE CASCADE** or a deletion trigger).
+* *Stable Ordering in Buckets:* `position` provides deterministic, persistent order for incomplete tasks and enables O(1) midpoint insertion on drag-and-drop. The client may occasionally recompact positions (e.g., reset to multiples of 1024) to widen gaps.
 
-* *Due Dates & Times:* The move from a date-only field to `due_at` (timestamp with time zone) addresses the requirement that a task in a bucket like \#THIS WEEK can still have a specific due date **and time** for scheduling or reminders. This provides timestamp granularity as needed by the design.
+* *Sub-Tasks:* The `parent_task_id` FK allows nesting tasks (one level deep) so that larger tasks can be broken down into smaller steps. This recursion via self-reference keeps the schema normalized (no separate sub-task table needed) while fulfilling the feature of sub-tasks in the product. We ensure that if a parent task is deleted, its sub-tasks are also removed or marked deleted to avoid orphaned subtasks (implemented via ON DELETE CASCADE or a deletion trigger).
 
-* *Recurrence:* Storing a `recurrence_rule` as text meets the need for dynamic recurring tasks in the \#ROUTINES bucket. Instead of listing all future occurrences, we keep a rule (e.g. "every Monday") and generate the next task occurrence when the current one is completed. The schema is forward-compatible with NLP input; for example, a phrase like *"Submit report every Friday"* can be parsed by the app and saved into `title`, `due_at` (for the first occurrence), and `recurrence_rule`. No additional fields are required for NLP, since the existing fields capture the necessary structured data (the natural language is interpreted into these fields).
+* *Due Dates & Times:* The move from a date-only field to `due_at` (timestamp with time zone) addresses the requirement that a task in a bucket like #THIS WEEK can still have a specific due date and time for scheduling or reminders. This provides timestamp granularity as needed by the design.
 
-* *Sync Metadata:* Adding `updated_at` and `deleted_at` is critical for the offline-first, multi-device sync strategy. Every change touches `updated_at` (via a trigger) so that clients can pull incremental updates (e.g., “give me all tasks where `updated_at` \> my last sync”). The `deleted_at` field enables **logical deletes** – rather than immediately removing tasks from the database, which could lead to sync conflicts or data loss, we mark them deleted. Other devices then receive that tombstone and can hide or delete the task locally. This approach supports *deterministic conflict resolution* (Supabase/Postgres can do "last-write-wins" based on `updated_at`, and we never lose a delete operation since it’s a state in the data model rather than an absence).
+* *Recurrence:* Storing a `recurrence_rule` as text meets the need for dynamic recurring tasks in the #ROUTINES bucket. Instead of listing all future occurrences, we keep a rule (e.g. "every Monday") and generate the next task occurrence when the current one is completed. The schema is forward-compatible with NLP input; for example, a phrase like "Submit report every Friday" can be parsed by the app and saved into `title`, `due_at` (for the first occurrence), and `recurrence_rule`. No additional fields are required for NLP, since the existing fields capture the necessary structured data (the natural language is interpreted into these fields).
+
+* *Sync Metadata:* Adding `updated_at` and `deleted_at` is critical for the offline-first, multi-device sync strategy. Every change touches `updated_at` (via a trigger) so that clients can pull incremental updates (e.g., “give me all tasks where `updated_at` > my last sync”). The `deleted_at` field enables logical deletes – rather than immediately removing tasks from the database, which could lead to sync conflicts or data loss, we mark them deleted. Other devices then receive that tombstone and can hide or delete the task locally. This approach supports deterministic conflict resolution (Supabase/Postgres can do "last-write-wins" based on `updated_at`, and we never lose a delete operation since it’s a state in the data model rather than an absence).
 
 * *UUID Primary Key:* Switching `task_id` to a UUID `id` ensures that tasks created on different devices won’t clash on ID. The architecture calls for client-generated IDs (UUID/ULID) for exactly this reason. It allows the app to create tasks offline and later upsert to the server without id conflicts, and it aligns with Supabase’s preference for UUID keys in distributed systems.
 
@@ -128,6 +132,8 @@ To ensure the schema performs well and supports offline sync and filtering, we a
   * Index on `(user_id, updated_at)` – enables efficient delta queries for sync, e.g. selecting all of a user’s tasks updated since a given timestamp.
 
   * Index on `(user_id, bucket_key, is_completed, due_at)` – supports fast lookups for listing tasks by bucket (and filtering out completed ones, ordering by due date). This aligns with typical queries like “show all incomplete tasks in THIS WEEK, sorted by due time.”
+
+  * Index on `(user_id, bucket_key, position)` – supports ordered board views by retrieving incomplete tasks in deterministic order with minimal sorting cost.
 
   * (Optional) Index on `parent_task_id` – speeds up retrieval of sub-tasks for a given parent task (especially if we frequently display or count sub-tasks). If we include `user_id` in this index (i.e. `(user_id, parent_task_id)`), it could further optimize queries under RLS that always filter by user anyway.
 

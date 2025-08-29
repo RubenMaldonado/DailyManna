@@ -26,15 +26,15 @@ This document outlines a prioritized, iterative development approach for Daily M
 - As a developer, I need clear separation of concerns between UI, domain, and data layers
 
 **Acceptance Criteria**:
-- [ ] Refactor existing Xcode project into modular packages:
+- [x] Refactor existing Xcode project into modular packages:
   - `App` (main target)
   - `Domain` (pure Swift business logic)
   - `Data` (SwiftData models and repositories)
   - `DesignSystem` (UI components and tokens)
   - `Features` (feature-specific UI modules)
-- [ ] Implement Repository pattern with protocols
-- [ ] Set up dependency injection container
-- [ ] Create basic logging and error handling infrastructure
+- [x] Implement Repository pattern with protocols
+- [x] Set up dependency injection container
+- [x] Create basic logging and error handling infrastructure
 
 ### Epic 0.2: Supabase Integration & Authentication | COMPLETED
 **Priority**: Critical
@@ -47,14 +47,14 @@ This document outlines a prioritized, iterative development approach for Daily M
 - As a developer, I need secure session management and token refresh
 
 **Acceptance Criteria**:
-- [ ] Set up Supabase project with development environment
-- [ ] Implement database schema as defined in data model
-- [ ] Create RLS policies for user isolation
-- [ ] Integrate Supabase Swift SDK
-- [ ] Implement Sign in with Apple
-- [ ] Implement Google OAuth
-- [ ] Set up secure session management with Keychain
-- [ ] Create authentication state management
+- [x] Set up Supabase project with development environment
+- [x] Implement database schema as defined in data model
+- [x] Create RLS policies for user isolation
+- [x] Integrate Supabase Swift SDK
+- [x] Implement Sign in with Apple
+- [x] Implement Google OAuth
+- [x] Set up secure session management with Keychain
+- [x] Create authentication state management
 
 ### Epic 0.3: Swift Data Models & Local Storage | COMPLETED
 **Priority**: Critical
@@ -74,6 +74,51 @@ This document outlines a prioritized, iterative development approach for Daily M
 - [x] Add sync metadata fields (remoteID, updatedAt, deletedAt)
 - [x] Create basic repository implementations for local storage
 - [x] Implement UUID generation for offline-first approach
+
+### Epic 0.4: Supabase MCP Server Integration
+**Priority**: High
+**Estimated Effort**: 0.5–1 week
+**Goal**: Enable AI-assisted development by integrating the official Supabase MCP server so we can design/modify database schema, manage projects/branches, run SQL, fetch config, and automate Supabase tasks directly from Cursor.
+
+**Context & Reference**:
+- Supabase announcement: [Supabase MCP Server](https://supabase.com/blog/mcp-server)
+- Setup guide: `docs/Epic 0.4 - Supabase MCP Setup - Cursor.md`
+
+**User Stories**:
+- As a developer, I can connect Cursor to Supabase using MCP and my PAT to automate routine backend ops.
+- As a developer, I can run SQL, design tables, and manage migrations from Cursor via MCP tools.
+- As a developer, I can fetch project `url` and `anon key` and generate client types through tools.
+- As a developer, I can create database branches safely and switch them for development.
+- As a developer, I can retrieve logs to debug integration issues without leaving Cursor.
+
+**Acceptance Criteria**:
+- [ ] MCP server configured in `.cursor/mcp.json` with `@supabase/mcp-server-supabase@latest` and PAT.
+- [ ] PAT is stored securely and not committed; add `.gitignore`/secrets hygiene note.
+- [ ] Step-by-step setup doc created: `docs/Epic 0.4 - Supabase MCP Setup - Cursor.md` (Cursor on macOS) with:
+  - Installing MCP server via `npx` and adding JSON.
+  - Creating a Supabase Personal Access Token; scoping guidance and rotation.
+  - Verifying tool discovery and a smoke test (e.g., `list_tables`, `execute_sql`).
+  - Notes for Windows/Linux JSON variants.
+- [ ] Working examples documented for common MCP activities:
+  - Design tables and track via migrations (create/alter/drop within a dev branch).
+  - Execute SQL for reports and data checks (read-only and cautious writes).
+  - Create and manage database branches; pause/restore projects safely.
+  - Fetch project configuration (URL, anon key) for local config.
+  - Retrieve logs for debugging (auth, database, realtime) during development.
+  - Generate TypeScript types (for web tooling/docs).
+- [ ] Safety guidance included: prefer branches, avoid destructive ops in prod, confirmation prompts, rollback patterns.
+- [ ] "How we’ll use MCP in Daily Manna" section mapping activities to current epics (e.g., Labels schema, RLS/policies, triggers, migrations).
+- [ ] Cross-links added between this epic and the setup doc.
+
+**Milestones**:
+- Day 1: Configure `.cursor/mcp.json`, create PAT, verify connection; smoke-test tools.
+- Day 2: Author setup guide with CLI snippets; add usage recipes for our workflow.
+- Day 3: Trial-run: use MCP to inspect current schema, list tables, and export a migration diff in a dev branch. Update docs with lessons learned.
+
+**Definition of Done**:
+- MCP tools are discoverable and usable from Cursor; team can perform listed activities safely.
+- Setup guide exists, is accurate, and linked from the roadmap.
+- No secrets are committed; secrets guidance documented.
 
 ---
 
@@ -140,27 +185,28 @@ This document outlines a prioritized, iterative development approach for Daily M
 - [x] Enable Supabase Realtime via publication and foreground subscribe hooks
 - [x] Provide debug-only Settings for bulk delete and sample data generation
 
-### Epic 1.4: Design System Implementation
+### Epic 1.4: Ordered Board (Drag-and-drop Reordering)
 **Priority**: Medium-High
-**Estimated Effort**: 1.5 weeks
-**Goal**: Establish consistent, accessible UI foundation
+**Estimated Effort**: 1 week
+**Goal**: Precise in-bucket and cross-bucket reordering with persistent order
+**Status**: COMPLETED
 
 **User Stories**:
-- As a user, the app feels polished and consistent across all screens
-- As a user with accessibility needs, the app works well with system settings
-- As a developer, I have reusable components that maintain consistency
+- As a user, I can reorder tasks within a bucket by drag-and-drop
+- As a user, I can drop a task in an exact position across buckets
+- As a user, new tasks appear at the bottom of a bucket
+- As a user, completed tasks stay ordered by completion date
 
 **Acceptance Criteria**:
-- [ ] Implement design token system from design specification
-- [ ] Create surface/material abstraction for future Liquid Glass compatibility
-- [ ] Build core UI components:
-  - Task cells with proper states
-  - Bucket headers
-  - Basic buttons and forms
-  - Loading states
-- [ ] Implement accessibility features (VoiceOver, Dynamic Type, Reduce Motion)
-- [ ] Add Dark Mode support
-- [ ] Create SwiftUI preview catalog for components
+- [x] Add `position` field and migrations (local + Supabase)
+- [x] Implement precise drop index and insertion indicator
+- [x] Optimistic local reorder (no implicit animations)
+- [x] Persist `position` and sync changes
+- [x] Recompact positions as needed (helper implemented)
+
+**References**:
+- `docs/Epic 1.4 - Ordered Board.md`
+- `docs/Epic 1.4 - Ordered Board Migration.sql`
 
 ---
 
@@ -184,6 +230,46 @@ This document outlines a prioritized, iterative development approach for Daily M
 - [ ] Add label chips to task display
 - [ ] Create saved filter views
 - [ ] Sync label data across devices
+
+#### Implementation Plan
+- **Database & RLS**
+  - Create/verify `labels` and `task_labels` with `updated_at` triggers, tombstones, indexes, and Realtime publication.
+  - Enforce `(user_id, name)` unique on active labels; simple RLS: `user_id = auth.uid()` on both tables.
+  - Reference migration: `docs/Epic 2.1 - Labels & Filtering Migration.sql`.
+- **Local Storage (SwiftData)**
+  - Use `LabelEntity` and `TaskLabelEntity` (junction) for local-first CRUD and queries.
+  - Add fetch helpers: labels for task; tasks for label(s); filter predicates for ANY/ALL.
+- **Repositories & Sync**
+  - Local: extend `SwiftDataLabelsRepository` with assign/unassign and query helpers.
+  - Remote: extend `SupabaseLabelsRepository` and `SupabaseTasksRepository` (or a small `SupabaseTaskLabels` helper) to upsert labels and link/unlink in `task_labels`.
+  - Sync: update `SyncService` to delta pull/push labels and `task_labels` with 120s overlap; debounce Realtime to a pull.
+- **Design System & UI**
+  - Colors: add curated label color tokens in `DesignSystem/Tokens/Colors.swift`.
+  - Chips: enhance `DesignSystem/Components/LabelChip.swift` for display/interactive variants and overflow (`+N`).
+  - TaskCard: render chips under title; tap-to-filter; long-press to edit labels.
+  - Label Management: list, search, create, edit (name/color), delete (tombstone) with undo.
+  - Assignment UI: multi-select with search and create-on-the-fly in task create/edit.
+  - Filtering UI: global multi-label picker (ANY default, ALL optional), active filter bar with clear.
+  - Saved Filters: SwiftData entity (`name`, `labelIDs`, `matchMode`), quick menu to apply/rename/delete.
+- **Testing & Perf**
+  - Unit: repository CRUD, label set union/unlink, LWW (name/color), filter predicates.
+  - Integration: Supabase RLS/CRUD for labels and links, delta sync, Realtime hint path.
+  - UI: label CRUD, assign/unassign, filter and saved views flows; offline-first behavior.
+  - Performance: indexes validated; smooth lists at 1k–5k tasks; debounced searches.
+
+#### Milestones (est. 2 weeks)
+- Days 1–2: DB/RLS/index/Realtime verification; remote/local repos APIs; DTOs.
+- Days 3–4: SwiftData queries/migrations; `SyncService` for labels + `task_labels`.
+- Days 5–7: Chips, color tokens, label management, assignment UI.
+- Days 8–9: Filtering + saved filters across list/board; polish.
+- Day 10: Tests, perf, accessibility/haptics; docs & feature flag prep.
+
+#### Definition of Done
+- CRUD for labels with colors; assignment from task flows; chips visible in cards.
+- Multi-label filtering (ANY/ALL) across `TaskListView` and `BucketBoardView`; saved filters.
+- Robust delta sync + Realtime hints for labels and `task_labels`; tombstones respected.
+- Tests green; no linter issues; acceptable performance and accessibility.
+
 
 ### Epic 2.2: Subtasks & Rich Descriptions
 **Priority**: Medium

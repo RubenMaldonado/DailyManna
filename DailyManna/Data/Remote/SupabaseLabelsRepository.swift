@@ -18,9 +18,11 @@ final class SupabaseLabelsRepository: RemoteLabelsRepository {
     func createLabel(_ label: Label) async throws -> Label {
         let dto = LabelDTO.from(domain: label)
         
+        // Upsert with ON CONFLICT (user_id,name) to revive tombstoned row and update color/name
+        // Use primary key upsert to avoid dependency on a composite unique constraint
         let response: LabelDTO = try await client
             .from("labels")
-            .insert(dto)
+            .upsert(dto, onConflict: "id")
             .select()
             .single()
             .execute()
@@ -96,6 +98,36 @@ final class SupabaseLabelsRepository: RemoteLabelsRepository {
         
         Logger.shared.info("Synced \(syncedLabels.count) labels", category: .data)
         return syncedLabels
+    }
+
+    // MARK: - Task Labels (junction)
+    func link(_ link: TaskLabelLink) async throws {
+        // Use primary key upsert to avoid dependency on composite unique constraints
+        let dto = TaskLabelLinkDTO.from(domain: link)
+        let _: [TaskLabelLinkDTO] = try await client
+            .from("task_labels")
+            .upsert(dto, onConflict: "id")
+            .select()
+            .execute()
+            .value
+    }
+
+    func unlink(taskId: UUID, labelId: UUID) async throws {
+        _ = try await client
+            .from("task_labels")
+            .update(["deleted_at": Date().ISO8601Format()])
+            .eq("task_id", value: taskId.uuidString)
+            .eq("label_id", value: labelId.uuidString)
+            .execute()
+    }
+
+    func fetchTaskLabelLinks(since lastSync: Date?) async throws -> [TaskLabelLink] {
+        var query = client
+            .from("task_labels")
+            .select("*")
+        if let lastSync { query = query.gte("updated_at", value: lastSync.ISO8601Format()) }
+        let response: [TaskLabelLinkDTO] = try await query.execute().value
+        return response.map { $0.toDomain() }
     }
     
     // MARK: - Realtime (no-op baseline)

@@ -36,14 +36,32 @@ final class DataContainer {
             LabelEntity.self,
             TaskLabelEntity.self,
             TimeBucketEntity.self,
-            SyncStateEntity.self
+            SyncStateEntity.self,
+            SavedFilterEntity.self
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         
         do {
             self.modelContainer = try ModelContainer(for: schema, configurations: [modelConfiguration])
         } catch {
+            // If schema changed incompatibly (e.g., added properties), SwiftData may fail to open the store.
+            // As a recovery in development builds, wipe the Application Support store and retry.
+            #if DEBUG
+            let fm = FileManager.default
+            if let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+                try? fm.removeItem(at: appSupport)
+                try? fm.createDirectory(at: appSupport, withIntermediateDirectories: true)
+                do {
+                    self.modelContainer = try ModelContainer(for: schema, configurations: [modelConfiguration])
+                } catch {
+                    throw DataError.initializationFailed("Failed to create ModelContainer after reset: \(error.localizedDescription)")
+                }
+            } else {
+                throw DataError.initializationFailed("Failed to create ModelContainer and could not access Application Support: \(error.localizedDescription)")
+            }
+            #else
             throw DataError.initializationFailed("Failed to create ModelContainer: \(error.localizedDescription)")
+            #endif
         }
         
         let modelContext = ModelContext(modelContainer)
@@ -83,7 +101,8 @@ final class DataContainer {
             TaskEntity.self,
             LabelEntity.self,
             TaskLabelEntity.self,
-            SyncStateEntity.self
+            SyncStateEntity.self,
+            SavedFilterEntity.self
         ])
         
         let modelConfiguration = ModelConfiguration(

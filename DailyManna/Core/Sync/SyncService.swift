@@ -195,6 +195,30 @@ final class SyncService: ObservableObject {
         if let maxServerUpdated = remoteLabels.map({ $0.updatedAt }).max() {
             try await syncStateStore.updateLabelsCheckpoint(userId: userId, to: maxServerUpdated)
         }
+
+        // 3a. Push local task-label link changes
+        let pendingLinks = (try? await localLabelsRepository.fetchTaskLabelLinksNeedingSync(for: userId)) ?? []
+        if !pendingLinks.isEmpty {
+            Logger.shared.info("Pushing \(pendingLinks.count) task-label link changes", category: .sync)
+            for link in pendingLinks {
+                if link.deletedAt == nil {
+                    try await remoteLabelsRepository.link(link)
+                } else {
+                    try await remoteLabelsRepository.unlink(taskId: link.taskId, labelId: link.labelId)
+                }
+                try await localLabelsRepository.markTaskLabelLinkSynced(taskId: link.taskId, labelId: link.labelId)
+            }
+        }
+
+        // 3b. Pull task-label links (junction) - delta
+        let sinceLinks = isColdStartLabels ? nil : sinceL
+        let remoteLinks = try await remoteLabelsRepository.fetchTaskLabelLinks(since: sinceLinks)
+        if !remoteLinks.isEmpty {
+            Logger.shared.info("Pulling \(remoteLinks.count) remote task-label link changes", category: .sync)
+            for link in remoteLinks {
+                try await localLabelsRepository.upsertTaskLabelLink(link)
+            }
+        }
     }
     
     /// Performs initial sync for a user

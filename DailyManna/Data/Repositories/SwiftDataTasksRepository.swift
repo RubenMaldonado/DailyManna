@@ -29,7 +29,12 @@ actor SwiftDataTasksRepository: TasksRepository {
             }
         }
         
-        descriptor.sortBy = [SortDescriptor(\TaskEntity.dueAt, order: .forward), SortDescriptor(\TaskEntity.createdAt, order: .forward)]
+        // Sort: for a specific bucket by position (incomplete first), else general sort
+        if bucket != nil {
+            descriptor.sortBy = [SortDescriptor(\TaskEntity.position, order: .forward), SortDescriptor(\TaskEntity.createdAt, order: .forward)]
+        } else {
+            descriptor.sortBy = [SortDescriptor(\TaskEntity.bucketKey, order: .forward), SortDescriptor(\TaskEntity.position, order: .forward), SortDescriptor(\TaskEntity.createdAt, order: .forward)]
+        }
         
         let entities = try modelContext.fetch(descriptor)
         return entities.map { $0.toDomainModel() }
@@ -150,6 +155,35 @@ actor SwiftDataTasksRepository: TasksRepository {
         // Delete tasks for user
         let tasks = try modelContext.fetch(FetchDescriptor<TaskEntity>(predicate: #Predicate<TaskEntity> { $0.userId == userId }))
         for t in tasks { modelContext.delete(t) }
+        try modelContext.save()
+    }
+
+    // MARK: - Ordering helpers
+    func nextPositionForBottom(userId: UUID, in bucket: TimeBucket) async throws -> Double {
+        let descriptor = FetchDescriptor<TaskEntity>(
+            predicate: #Predicate<TaskEntity> { entity in
+                entity.userId == userId && entity.bucketKey == bucket.rawValue && entity.deletedAt == nil && entity.isCompleted == false
+            },
+            sortBy: [SortDescriptor(\TaskEntity.position, order: .reverse)]
+        )
+        let last = try modelContext.fetch(descriptor).first
+        let lastPos = last?.position ?? 0
+        return lastPos + 1024
+    }
+
+    func recompactPositions(userId: UUID, in bucket: TimeBucket) async throws {
+        let descriptor = FetchDescriptor<TaskEntity>(
+            predicate: #Predicate<TaskEntity> { entity in
+                entity.userId == userId && entity.bucketKey == bucket.rawValue && entity.deletedAt == nil && entity.isCompleted == false
+            },
+            sortBy: [SortDescriptor(\TaskEntity.position, order: .forward)]
+        )
+        let items = try modelContext.fetch(descriptor)
+        var pos: Double = 1024
+        for item in items {
+            item.position = pos
+            pos += 1024
+        }
         try modelContext.save()
     }
 }

@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import SwiftData
 
 enum DIError: Error, LocalizedError {
     case dependencyNotRegistered(String)
@@ -79,6 +80,7 @@ final class Dependencies {
         registerSingleton(type: TasksRepository.self) { dataContainer.tasksRepository }
         registerSingleton(type: LabelsRepository.self) { dataContainer.labelsRepository }
         registerSingleton(type: SyncStateStore.self) { dataContainer.syncStateStore }
+        registerSingleton(type: SavedFiltersRepository.self) { SwiftDataSavedFiltersRepository(modelContext: ModelContext(dataContainer.modelContainer)) }
         
         // Remote Repositories
         registerSingleton(type: RemoteTasksRepository.self) { SupabaseTasksRepository() }

@@ -36,7 +36,10 @@ struct LabelDTO: Codable {
             color: color,
             createdAt: created_at,
             updatedAt: updated_at,
-            deletedAt: deleted_at
+            deletedAt: deleted_at,
+            version: 1,
+            remoteId: id,
+            needsSync: false
         )
     }
 }

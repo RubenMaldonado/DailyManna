@@ -44,4 +44,12 @@ public protocol LabelsRepository: Sendable {
     
     /// Deletes all labels and associations for a user (local-only)
     func deleteAll(for userId: UUID) async throws
+
+    // MARK: - Task-Label Links (junction)
+    /// Fetches task-label links marked as needing sync (adds and tombstoned removes)
+    func fetchTaskLabelLinksNeedingSync(for userId: UUID) async throws -> [TaskLabelLink]
+    /// Upserts a task-label link from a remote payload
+    func upsertTaskLabelLink(_ link: TaskLabelLink) async throws
+    /// Marks a task-label link as synced (clears needsSync) identified by task and label
+    func markTaskLabelLinkSynced(taskId: UUID, labelId: UUID) async throws
 }

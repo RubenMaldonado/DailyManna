@@ -26,7 +26,7 @@ struct BucketHeader: View {
         }
         .padding(.horizontal, Spacing.small)
         .padding(.vertical, Spacing.xSmall)
-        .background(Colors.surfaceVariant)
+        .surfaceStyle(.content)
         .cornerRadius(Spacing.xSmall)
         .accessibilityElement(children: .combine)
     }

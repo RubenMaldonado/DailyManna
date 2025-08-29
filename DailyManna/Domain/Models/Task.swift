@@ -12,6 +12,7 @@ public struct Task: Identifiable, Equatable, Hashable, Codable {
     public let id: UUID
     public let userId: UUID
     public var bucketKey: TimeBucket
+    public var position: Double
     public var parentTaskId: UUID?
     public var title: String
     public var description: String?
@@ -32,6 +33,7 @@ public struct Task: Identifiable, Equatable, Hashable, Codable {
         id: UUID = UUID(),
         userId: UUID,
         bucketKey: TimeBucket,
+        position: Double = 0,
         parentTaskId: UUID? = nil,
         title: String,
         description: String? = nil,
@@ -49,6 +51,7 @@ public struct Task: Identifiable, Equatable, Hashable, Codable {
         self.id = id
         self.userId = userId
         self.bucketKey = bucketKey
+        self.position = position
         self.parentTaskId = parentTaskId
         self.title = title
         self.description = description

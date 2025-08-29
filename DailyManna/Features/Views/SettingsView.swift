@@ -17,7 +17,7 @@ final class SettingsViewModel: ObservableObject {
     private let remoteTasksRepository: RemoteTasksRepository
     private let remoteLabelsRepository: RemoteLabelsRepository
     private let syncService: SyncService
-    private let userId: UUID
+    let userId: UUID
     
     init(tasksRepository: TasksRepository,
          labelsRepository: LabelsRepository,
@@ -86,6 +86,23 @@ final class SettingsViewModel: ObservableObject {
         }
         isWorking = false
     }
+
+    /// Clears local SwiftData (tasks, labels, junctions) and checkpoints, then performs a pull-only sync
+    func resetLocalToServer() async {
+        guard !isWorking else { return }
+        isWorking = true
+        statusMessage = "Resetting local store…"
+        do {
+            try await labelsRepository.deleteAll(for: userId)
+            try await tasksRepository.deleteAll(for: userId)
+            try await syncService.syncStateStore.reset(userId: userId)
+            await syncService.sync(for: userId)
+            statusMessage = "Local store reset — pulled from server"
+        } catch {
+            statusMessage = "Failed: \(error.localizedDescription)"
+        }
+        isWorking = false
+    }
     
     private func currentDeviceName() -> String {
         #if os(iOS)
@@ -99,16 +116,30 @@ final class SettingsViewModel: ObservableObject {
 struct SettingsView: View {
     @StateObject var viewModel: SettingsViewModel
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var authService: AuthenticationService
     
     var body: some View {
         NavigationStack {
             Form {
+                Section("Account") {
+                    Button("Sign out") { _Concurrency.Task { try? await authService.signOut() } }
+                        .buttonStyle(SecondaryButtonStyle(size: .small))
+                }
                 Section("Danger Zone") {
                     Button(role: .destructive) {
                         _Concurrency.Task { await viewModel.deleteAllData() }
                     } label: {
                         Text("Delete ALL data (local + Supabase)")
                     }
+                    .buttonStyle(DestructiveButtonStyle())
+                    .disabled(viewModel.isWorking)
+
+                    Button {
+                        _Concurrency.Task { await viewModel.resetLocalToServer() }
+                    } label: {
+                        Text("Reset LOCAL to SERVER (pull-only)")
+                    }
+                    .buttonStyle(SecondaryButtonStyle(size: .small))
                     .disabled(viewModel.isWorking)
                 }
                 Section("Generators") {
@@ -117,7 +148,11 @@ struct SettingsView: View {
                     } label: {
                         Text("Generate sample tasks (one per bucket)")
                     }
+                    .buttonStyle(PrimaryButtonStyle(size: .small))
                     .disabled(viewModel.isWorking)
+                }
+                Section("Labels") {
+                    LabelManagementInlineView(userId: viewModel.userId)
                 }
                 if let status = viewModel.statusMessage {
                     Section("Status") { Text(status) }
@@ -126,9 +161,9 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .toolbar {
                 #if os(iOS)
-                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() }.buttonStyle(SecondaryButtonStyle(size: .small)) }
                 #else
-                ToolbarItem(placement: .automatic) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .automatic) { Button("Done") { dismiss() }.buttonStyle(SecondaryButtonStyle(size: .small)) }
                 #endif
             }
         }

@@ -77,6 +77,22 @@ end $$;
 create index if not exists idx_tasks_user_updated on public.tasks (user_id, updated_at);
 create index if not exists idx_tasks_user_bucket on public.tasks (user_id, bucket_key, is_completed, due_at);
 
+-- 8) Ordered board: add position and index, with backfill guidance
+alter table public.tasks add column if not exists position double precision not null default 0;
+create index if not exists tasks_user_bucket_position_idx on public.tasks (user_id, bucket_key, position asc);
+
+-- Backfill positions for incomplete tasks per (user_id, bucket_key) ordered by created_at
+with ranked as (
+  select id,
+         row_number() over(partition by user_id, bucket_key order by created_at asc) as rn
+  from public.tasks
+  where deleted_at is null and is_completed = false
+)
+update public.tasks t
+set position = r.rn * 1024
+from ranked r
+where t.id = r.id;
+
 -- Done.
 
 

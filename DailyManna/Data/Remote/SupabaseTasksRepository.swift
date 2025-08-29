@@ -80,6 +80,8 @@ final class SupabaseTasksRepository: RemoteTasksRepository {
             .select("*")
             .eq("bucket_key", value: bucketKey)
             .is("deleted_at", value: nil)
+            .order("position", ascending: true)
+            .order("created_at", ascending: true)
             .execute()
             .value
         

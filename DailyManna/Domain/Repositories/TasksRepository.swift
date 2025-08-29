@@ -38,4 +38,10 @@ public protocol TasksRepository: Sendable {
     
     /// Deletes all data for a user (local-only)
     func deleteAll(for userId: UUID) async throws
+
+    /// Computes the next bottom position for a bucket (incomplete tasks only)
+    func nextPositionForBottom(userId: UUID, in bucket: TimeBucket) async throws -> Double
+
+    /// Recompacts positions within a bucket to widen gaps again (incomplete tasks only)
+    func recompactPositions(userId: UUID, in bucket: TimeBucket) async throws
 }

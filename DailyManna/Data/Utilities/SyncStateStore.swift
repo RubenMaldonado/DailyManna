@@ -59,6 +59,14 @@ actor SyncStateStore {
         state.updatedAt = Date()
         try modelContext.save()
     }
+
+    /// Resets checkpoints for a user by deleting the entity
+    func reset(userId: UUID) async throws {
+        if let entity = try loadEntity(userId: userId) {
+            modelContext.delete(entity)
+            try modelContext.save()
+        }
+    }
 }
 
 

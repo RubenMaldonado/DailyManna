@@ -11,6 +11,7 @@ struct TaskDTO: Codable {
     let id: UUID
     let user_id: UUID
     let bucket_key: String
+    let position: Double?
     let parent_task_id: UUID?
     let title: String
     let description: String?
@@ -27,6 +28,7 @@ struct TaskDTO: Codable {
             id: task.id,
             user_id: task.userId,
             bucket_key: task.bucketKey.rawValue,
+            position: task.position,
             parent_task_id: task.parentTaskId,
             title: task.title,
             description: task.description,
@@ -45,6 +47,7 @@ struct TaskDTO: Codable {
             id: id,
             userId: user_id,
             bucketKey: TimeBucket(rawValue: bucket_key) ?? .thisWeek,
+            position: position ?? 0,
             parentTaskId: parent_task_id,
             title: title,
             description: description,

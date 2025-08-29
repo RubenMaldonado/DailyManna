@@ -21,19 +21,34 @@ struct TaskCard: View {
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.small) {
             Button {
+                #if os(iOS)
+                Haptics.lightTap()
+                #endif
                 onToggleCompletion?()
             } label: {
-                Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
-                    .font(.title2)
-                    .foregroundColor(task.isCompleted ? Colors.primary : Colors.onSurface.opacity(0.6))
+                ZStack {
+                    Circle().fill(Color.clear)
+                        .frame(width: 32, height: 32)
+                    Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
+                        .font(.title2)
+                        .foregroundColor(task.isCompleted ? Colors.primary : Colors.onSurface.opacity(0.6))
+                }
             }
             .buttonStyle(.plain) // To remove default button styling
+            .accessibilityLabel(task.isCompleted ? "Mark incomplete" : "Mark complete")
+            .accessibilityHint("Toggles completion for \(task.title)")
             
             VStack(alignment: .leading, spacing: Spacing.xxSmall) {
-                Text(task.title)
-                    .style(Typography.headline)
-                    .strikethrough(task.isCompleted)
-                    .foregroundColor(task.isCompleted ? Colors.onSurfaceVariant : Colors.onSurface)
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.xxSmall) {
+                    Text(task.title)
+                        .style(Typography.headline)
+                        .strikethrough(task.isCompleted)
+                        .foregroundColor(task.isCompleted ? Colors.onSurfaceVariant : Colors.onSurface)
+                        .lineLimit(2)
+                    if let dueAt = task.dueAt {
+                        DueChip(date: dueAt)
+                    }
+                }
                 
                 if let description = task.description, !description.isEmpty {
                     Text(description)
@@ -43,25 +58,69 @@ struct TaskCard: View {
                 }
                 
                 if !labels.isEmpty {
-                    HStack(spacing: Spacing.xxSmall) {
-                        ForEach(labels) { label in
-                            LabelChip(label: label)
-                        }
-                    }
-                }
-                
-                if let dueAt = task.dueAt {
-                    Text("Due: \(dueAt, formatter: DateFormatter.shortDate)")
-                        .style(Typography.caption)
-                        .foregroundColor(Colors.onSurfaceVariant)
+                    FlowingChipsView(labels: labels)
                 }
             }
             Spacer()
         }
         .cardPadding()
-        .background(Colors.surface)
+        .surfaceStyle(.content)
         .cornerRadius(Spacing.small)
-        .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 2)
+    }
+}
+
+private struct FlowingChipsView: View {
+    let labels: [Label]
+    @State private var availableWidth: CGFloat = 0
+    private let rowHeight: CGFloat = 28
+    var body: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            buildRows(in: width)
+        }
+        .frame(minHeight: rowHeight)
+    }
+    private func buildRows(in width: CGFloat) -> some View {
+        var rows: [[Label]] = [[]]
+        var currentRowWidth: CGFloat = 0
+        for label in labels {
+            let chipWidth = estimatedChipWidth(for: label)
+            if currentRowWidth + chipWidth > width {
+                rows.append([label])
+                currentRowWidth = chipWidth
+            } else {
+                rows[rows.count - 1].append(label)
+                currentRowWidth += chipWidth
+            }
+        }
+        return VStack(alignment: .leading, spacing: 4) {
+            ForEach(0..<rows.count, id: \.self) { idx in
+                HStack(spacing: Spacing.xxSmall) {
+                    ForEach(rows[idx]) { label in LabelChip(label: label) }
+                }
+            }
+        }
+    }
+    private func estimatedChipWidth(for label: Label) -> CGFloat {
+        // Rough estimate: character count * 7 + paddings ~ 24
+        CGFloat(max(60, min(180, Double(label.name.count) * 7.0 + 24.0)))
+    }
+}
+
+private struct DueChip: View {
+    let date: Date
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "clock")
+            Text(DateFormatter.shortDate.string(from: date))
+        }
+        .font(.caption2)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .foregroundColor(Colors.onSurface)
+        .background(Colors.surfaceVariant)
+        .clipShape(Capsule())
+        .accessibilityLabel("Due \(DateFormatter.shortDate.string(from: date))")
     }
 }
 

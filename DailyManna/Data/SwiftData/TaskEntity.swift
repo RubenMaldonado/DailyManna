@@ -14,6 +14,7 @@ final class TaskEntity {
     @Attribute(.unique) var id: UUID
     var userId: UUID
     var bucketKey: String
+    var position: Double
     var parentTaskId: UUID?
     var title: String
     var taskDescription: String? // Renamed to avoid conflict with Swift's `description`
@@ -39,6 +40,7 @@ final class TaskEntity {
         userId: UUID,
         bucketKey: String,
         parentTaskId: UUID? = nil,
+        position: Double = 0,
         title: String,
         taskDescription: String? = nil,
         dueAt: Date? = nil,
@@ -56,6 +58,7 @@ final class TaskEntity {
         self.userId = userId
         self.bucketKey = bucketKey
         self.parentTaskId = parentTaskId
+        self.position = position
         self.title = title
         self.taskDescription = taskDescription
         self.dueAt = dueAt
@@ -77,6 +80,7 @@ final class TaskEntity {
             id: id,
             userId: userId,
             bucketKey: TimeBucket(rawValue: bucketKey) ?? .thisWeek,
+            position: position,
             parentTaskId: parentTaskId,
             title: title,
             description: taskDescription,
@@ -96,6 +100,7 @@ final class TaskEntity {
     func update(from domain: Task) {
         self.userId = domain.userId
         self.bucketKey = domain.bucketKey.rawValue
+        self.position = domain.position
         self.parentTaskId = domain.parentTaskId
         self.title = domain.title
         self.taskDescription = domain.description
@@ -120,6 +125,7 @@ extension TaskEntity {
             userId: domain.userId,
             bucketKey: domain.bucketKey.rawValue,
             parentTaskId: domain.parentTaskId,
+            position: domain.position,
             title: domain.title,
             taskDescription: domain.description,
             dueAt: domain.dueAt,

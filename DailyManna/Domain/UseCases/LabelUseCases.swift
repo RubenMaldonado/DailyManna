@@ -37,6 +37,18 @@ public final class LabelUseCases {
     
     /// Creates a new label
     public func createLabel(_ label: Label) async throws {
+        Logger.shared.info("UseCases.createLabel name=\(label.name) user=\(label.userId)", category: .data)
+        // Case-insensitive, per-user uniqueness with revive semantics
+        let existing = try await labelsRepository.fetchLabels(for: label.userId)
+        if var match = existing.first(where: { $0.name.caseInsensitiveCompare(label.name) == .orderedSame }) {
+            // Revive if deleted; update color if different
+            match.deletedAt = nil
+            if match.color != label.color { match.color = label.color }
+            match.updatedAt = Date()
+            match.needsSync = true
+            try await labelsRepository.updateLabel(match)
+            return
+        }
         var local = label
         local.updatedAt = Date()
         local.needsSync = true
@@ -45,6 +57,7 @@ public final class LabelUseCases {
     
     /// Updates an existing label
     public func updateLabel(_ label: Label) async throws {
+        Logger.shared.info("UseCases.updateLabel id=\(label.id) name=\(label.name)", category: .data)
         var updated = label
         updated.updatedAt = Date()
         updated.needsSync = true
@@ -70,5 +83,15 @@ public final class LabelUseCases {
     /// Dissociates a label from a task
     public func removeLabel(_ labelId: UUID, from taskId: UUID, for userId: UUID) async throws {
         try await labelsRepository.removeLabel(labelId, from: taskId, for: userId)
+    }
+
+    /// Sets the labels for a task by computing add/remove diff
+    public func setLabels(for taskId: UUID, to desiredLabelIds: Set<UUID>, userId: UUID) async throws {
+        let current = try await labelsRepository.fetchLabelsForTask(taskId).map { $0.id }
+        let currentSet = Set(current)
+        let toAdd = desiredLabelIds.subtracting(currentSet)
+        let toRemove = currentSet.subtracting(desiredLabelIds)
+        for add in toAdd { try await labelsRepository.addLabel(add, to: taskId, for: userId) }
+        for rem in toRemove { try await labelsRepository.removeLabel(rem, from: taskId, for: userId) }
     }
 }

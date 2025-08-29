@@ -57,6 +57,9 @@ public final class TaskUseCases {
     /// Creates a new task
     public func createTask(_ task: Task) async throws {
         var local = task
+        // New tasks go to the bottom of the selected bucket (incomplete set)
+        let bottom = try await tasksRepository.nextPositionForBottom(userId: task.userId, in: task.bucketKey)
+        local.position = bottom
         local.updatedAt = Date()
         local.needsSync = true
         try await tasksRepository.createTask(local)
@@ -68,6 +71,16 @@ public final class TaskUseCases {
         updated.updatedAt = Date()
         updated.needsSync = true
         try await tasksRepository.updateTask(updated)
+    }
+
+    /// Assigns labels to a task using a target set (diff add/remove)
+    public func setLabels(for taskId: UUID, to desired: Set<UUID>, userId: UUID) async throws {
+        let current = try await labelsRepository.fetchLabelsForTask(taskId).map { $0.id }
+        let currentSet = Set(current)
+        let toAdd = desired.subtracting(currentSet)
+        let toRemove = currentSet.subtracting(desired)
+        for id in toAdd { try await labelsRepository.addLabel(id, to: taskId, for: userId) }
+        for id in toRemove { try await labelsRepository.removeLabel(id, from: taskId, for: userId) }
     }
     
     /// Marks a task as completed or incomplete
@@ -88,6 +101,19 @@ public final class TaskUseCases {
             throw DomainError.notFound(id.uuidString)
         }
         task.bucketKey = newBucket
+        // Default to append at bottom if position will be assigned later by caller
+        task.updatedAt = Date()
+        task.needsSync = true
+        try await tasksRepository.updateTask(task)
+    }
+
+    /// Update only ordering and bucket in one step.
+    public func updateTaskOrderAndBucket(id: UUID, to newBucket: TimeBucket, position: Double, userId: UUID) async throws {
+        guard var task = try await tasksRepository.fetchTask(by: id) else {
+            throw DomainError.notFound(id.uuidString)
+        }
+        task.bucketKey = newBucket
+        task.position = position
         task.updatedAt = Date()
         task.needsSync = true
         try await tasksRepository.updateTask(task)
@@ -114,5 +140,10 @@ public final class TaskUseCases {
     /// Returns the number of tasks in a specific bucket for the user. Excludes completed by default.
     public func countTasks(for userId: UUID, in bucket: TimeBucket, includeCompleted: Bool = false) async throws -> Int {
         try await tasksRepository.countTasks(for: userId, in: bucket, includeCompleted: includeCompleted)
+    }
+
+    // MARK: - Ordering Helpers
+    public func recompactPositions(userId: UUID, in bucket: TimeBucket) async throws {
+        try await tasksRepository.recompactPositions(userId: userId, in: bucket)
     }
 }

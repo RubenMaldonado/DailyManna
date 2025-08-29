@@ -23,7 +23,9 @@ actor SwiftDataLabelsRepository: LabelsRepository {
             }
         )
         let entities = try modelContext.fetch(descriptor)
-        return entities.map { $0.toDomainModel() }
+        let result = entities.map { $0.toDomainModel() }
+        Logger.shared.info("Local fetch labels count=\(result.count) for user=\(userId)", category: .data)
+        return result
     }
     
     func fetchLabel(by id: UUID) async throws -> Label? {
@@ -38,6 +40,7 @@ actor SwiftDataLabelsRepository: LabelsRepository {
     }
     
     func createLabel(_ label: Label) async throws {
+        Logger.shared.info("Creating label locally: \(label.name)", category: .data)
         var local = label
         if local.remoteId == nil {
             local.needsSync = true
@@ -46,6 +49,7 @@ actor SwiftDataLabelsRepository: LabelsRepository {
         let entity = LabelEntity(from: local)
         modelContext.insert(entity)
         try modelContext.save()
+        Logger.shared.info("Created label locally: \(label.id)", category: .data)
     }
     
     func updateLabel(_ label: Label) async throws {
@@ -160,7 +164,10 @@ actor SwiftDataLabelsRepository: LabelsRepository {
             }
         )
         if let entity = try modelContext.fetch(descriptor).first {
-            modelContext.delete(entity)
+            // Soft-delete link (tombstone) to sync unlink across devices
+            entity.deletedAt = Date()
+            entity.updatedAt = Date()
+            entity.needsSync = true
             // Bump task.updatedAt when labels change
             if let task = try modelContext.fetch(FetchDescriptor<TaskEntity>(predicate: #Predicate<TaskEntity> { $0.id == taskId })).first {
                 task.updatedAt = Date()
@@ -187,5 +194,75 @@ actor SwiftDataLabelsRepository: LabelsRepository {
         let labels = try modelContext.fetch(FetchDescriptor<LabelEntity>(predicate: #Predicate<LabelEntity> { $0.userId == userId }))
         for l in labels { modelContext.delete(l) }
         try modelContext.save()
+    }
+
+    // MARK: - Task-Label Links (junction)
+    func fetchTaskLabelLinksNeedingSync(for userId: UUID) async throws -> [TaskLabelLink] {
+        let descriptor = FetchDescriptor<TaskLabelEntity>(
+            predicate: #Predicate<TaskLabelEntity> { entity in
+                entity.userId == userId && entity.needsSync == true
+            }
+        )
+        let entities = try modelContext.fetch(descriptor)
+        return entities.map { e in
+            TaskLabelLink(
+                id: e.id,
+                taskId: e.taskId,
+                labelId: e.labelId,
+                userId: e.userId,
+                createdAt: e.createdAt,
+                updatedAt: e.updatedAt,
+                deletedAt: e.deletedAt,
+                needsSync: e.needsSync,
+                remoteId: e.remoteId,
+                version: e.version
+            )
+        }
+    }
+
+    func upsertTaskLabelLink(_ link: TaskLabelLink) async throws {
+        let descriptor = FetchDescriptor<TaskLabelEntity>(
+            predicate: #Predicate<TaskLabelEntity> { entity in
+                entity.id == link.id
+            }
+        )
+        if let entity = try modelContext.fetch(descriptor).first {
+            entity.taskId = link.taskId
+            entity.labelId = link.labelId
+            entity.userId = link.userId
+            entity.createdAt = link.createdAt
+            entity.updatedAt = link.updatedAt
+            entity.deletedAt = link.deletedAt
+            entity.needsSync = false
+            entity.remoteId = link.remoteId
+            entity.version = link.version
+        } else {
+            let entity = TaskLabelEntity(
+                id: link.id,
+                taskId: link.taskId,
+                labelId: link.labelId,
+                userId: link.userId,
+                createdAt: link.createdAt,
+                updatedAt: link.updatedAt,
+                deletedAt: link.deletedAt,
+                needsSync: false,
+                remoteId: link.remoteId,
+                version: link.version
+            )
+            modelContext.insert(entity)
+        }
+        try modelContext.save()
+    }
+
+    func markTaskLabelLinkSynced(taskId: UUID, labelId: UUID) async throws {
+        let descriptor = FetchDescriptor<TaskLabelEntity>(
+            predicate: #Predicate<TaskLabelEntity> { entity in
+                entity.taskId == taskId && entity.labelId == labelId
+            }
+        )
+        if let entity = try modelContext.fetch(descriptor).first {
+            entity.needsSync = false
+            try modelContext.save()
+        }
     }
 }

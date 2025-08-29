@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import SwiftUI
 
 @MainActor
 final class TaskListViewModel: ObservableObject {
@@ -20,11 +21,19 @@ final class TaskListViewModel: ObservableObject {
     @Published var isPresentingTaskForm: Bool = false
     @Published var editingTask: Task? = nil
     @Published var pendingDelete: Task? = nil
+    @Published var isBoardModeActive: Bool = false
+    // Filtering
+    @Published var activeFilterLabelIds: Set<UUID> = []
+    @Published var matchAll: Bool = false
     
     private let taskUseCases: TaskUseCases
     private let labelUseCases: LabelUseCases
     private let syncService: SyncService?
-    private let userId: UUID
+    let userId: UUID
+    // Persist filter selection per user
+    @AppStorage("labelFilter_Ids") private var persistedFilterIdsRaw: String = ""
+    // Pending selections coming from TaskFormView (via NotificationCenter)
+    private var pendingLabelSelections: [UUID: Set<UUID>] = [:]
     private var cancellables: Set<AnyCancellable> = []
     
     init(taskUseCases: TaskUseCases, labelUseCases: LabelUseCases, userId: UUID, syncService: SyncService? = nil) {
@@ -32,6 +41,18 @@ final class TaskListViewModel: ObservableObject {
         self.labelUseCases = labelUseCases
         self.userId = userId
         self.syncService = syncService
+        // Restore persisted filter ids
+        if let restored = try? JSONDecoder().decode([UUID].self, from: Data(persistedFilterIdsRaw.utf8)) {
+            self.activeFilterLabelIds = Set(restored)
+        }
+
+        // Listen for label selections from TaskForm
+        NotificationCenter.default.addObserver(forName: Notification.Name("dm.taskform.labels.selection"), object: nil, queue: .main) { [weak self] note in
+            guard let self else { return }
+            guard let taskId = note.userInfo?["taskId"] as? UUID,
+                  let ids = note.userInfo?["labelIds"] as? [UUID] else { return }
+            self.pendingLabelSelections[taskId] = Set(ids)
+        }
         
         // Start observing sync state if available (Combine to avoid Task name clash)
         if let syncService = syncService {
@@ -50,7 +71,7 @@ final class TaskListViewModel: ObservableObject {
                     guard let self else { return }
                     _Concurrency.Task {
                         await self.refreshCounts()
-                        await self.fetchTasks(in: self.selectedBucket)
+                        await self.fetchTasks(in: self.isBoardModeActive ? nil : self.selectedBucket)
                     }
                 }
                 .store(in: &cancellables)
@@ -61,12 +82,28 @@ final class TaskListViewModel: ObservableObject {
         isLoading = true
         errorMessage = nil
         do {
-            self.tasksWithLabels = try await taskUseCases.fetchTasksWithLabels(for: userId, in: bucket)
+            var pairs = try await taskUseCases.fetchTasksWithLabels(for: userId, in: bucket)
+            // Apply OR filter by labels if any selected
+            if activeFilterLabelIds.isEmpty == false {
+                pairs = pairs.filter { pair in
+                    let ids = Set(pair.1.map { $0.id })
+                    return ids.intersection(activeFilterLabelIds).isEmpty == false
+                }
+            }
+            // Apply label filtering if any active
+            self.tasksWithLabels = pairs
         } catch {
             errorMessage = "Failed to fetch tasks: \(error.localizedDescription)"
             Logger.shared.error("Failed to fetch tasks", category: .ui, error: error)
         }
         isLoading = false
+    }
+
+    func clearFilters() {
+        activeFilterLabelIds.removeAll()
+        matchAll = false
+        _Concurrency.Task { await fetchTasks(in: isBoardModeActive ? nil : selectedBucket) }
+        persistFilterIds()
     }
 
     func select(bucket: TimeBucket) {
@@ -76,6 +113,12 @@ final class TaskListViewModel: ObservableObject {
             async let _ = self.fetchTasks(in: bucket)
             async let _ = self.refreshCounts()
             _ = await ()
+        }
+    }
+
+    private func persistFilterIds() {
+        if let data = try? JSONEncoder().encode(Array(activeFilterLabelIds)) {
+            persistedFilterIdsRaw = String(decoding: data, as: UTF8.self)
         }
     }
 
@@ -98,11 +141,14 @@ final class TaskListViewModel: ObservableObject {
     }
     
     func toggleTaskCompletion(task: Task) async {
+        await toggleTaskCompletion(task: task, refreshIn: isBoardModeActive ? nil : selectedBucket)
+    }
+
+    func toggleTaskCompletion(task: Task, refreshIn filter: TimeBucket?) async {
         do {
             try await taskUseCases.toggleTaskCompletion(id: task.id, userId: userId)
-            // Re-fetch or update locally
             await refreshCounts()
-            await fetchTasks(in: selectedBucket)
+            await fetchTasks(in: filter)
         } catch {
             errorMessage = "Failed to toggle task completion: \(error.localizedDescription)"
             Logger.shared.error("Failed to toggle task completion", category: .ui, error: error)
@@ -124,17 +170,28 @@ final class TaskListViewModel: ObservableObject {
             if let editing = editingTask {
                 let updated = draft.applying(to: editing)
                 try await taskUseCases.updateTask(updated)
+                // Persist label selections if available
+                if let desired = pendingLabelSelections[updated.id] {
+                    try await taskUseCases.setLabels(for: updated.id, to: desired, userId: userId)
+                    pendingLabelSelections.removeValue(forKey: updated.id)
+                }
             } else {
                 let newTask = draft.toNewTask()
                 try await taskUseCases.createTask(newTask)
+                if let desired = pendingLabelSelections[newTask.id] {
+                    try await taskUseCases.setLabels(for: newTask.id, to: desired, userId: userId)
+                    pendingLabelSelections.removeValue(forKey: newTask.id)
+                }
             }
             await refreshCounts()
-            await fetchTasks(in: selectedBucket)
+            await fetchTasks(in: isBoardModeActive ? nil : selectedBucket)
         } catch {
             errorMessage = "Failed to save task: \(error.localizedDescription)"
             Logger.shared.error("Failed to save task", category: .ui, error: error)
         }
     }
+
+    private func persistLabelSelections(taskId: UUID) async {}
 
     func confirmDelete(_ task: Task) {
         pendingDelete = task
@@ -146,12 +203,31 @@ final class TaskListViewModel: ObservableObject {
         await deleteTask(task: task)
         await refreshCounts()
     }
+
+    func performDelete(refreshIn filter: TimeBucket?) async {
+        guard let task = pendingDelete else { return }
+        pendingDelete = nil
+        do {
+            try await taskUseCases.deleteTask(by: task.id, for: userId)
+            await refreshCounts()
+            await fetchTasks(in: isBoardModeActive ? nil : filter)
+        } catch {
+            errorMessage = "Failed to delete task: \(error.localizedDescription)"
+            Logger.shared.error("Failed to delete task", category: .ui, error: error)
+        }
+    }
     
     func move(taskId: UUID, to bucket: TimeBucket) async {
+        // Backward-compatible: refresh current list bucket
+        await move(taskId: taskId, to: bucket, refreshIn: isBoardModeActive ? nil : selectedBucket)
+    }
+
+    /// Move task and refresh using a specific filter. Pass `nil` to refresh all buckets (board view).
+    func move(taskId: UUID, to bucket: TimeBucket, refreshIn filter: TimeBucket?) async {
         do {
             try await taskUseCases.moveTask(id: taskId, to: bucket, for: userId)
             await refreshCounts()
-            await fetchTasks(in: selectedBucket)
+            await fetchTasks(in: filter)
         } catch {
             errorMessage = "Failed to move task: \(error.localizedDescription)"
             Logger.shared.error("Failed to move task", category: .ui, error: error)
@@ -163,7 +239,7 @@ final class TaskListViewModel: ObservableObject {
         do {
             try await taskUseCases.createTask(newTask)
             await refreshCounts()
-            await fetchTasks(in: selectedBucket)
+            await fetchTasks(in: isBoardModeActive ? nil : selectedBucket)
         } catch {
             errorMessage = "Failed to add task: \(error.localizedDescription)"
             Logger.shared.error("Failed to add task", category: .ui, error: error)
@@ -174,10 +250,90 @@ final class TaskListViewModel: ObservableObject {
         do {
             try await taskUseCases.deleteTask(by: task.id, for: userId)
             await refreshCounts()
-            await fetchTasks(in: selectedBucket)
+            await fetchTasks(in: isBoardModeActive ? nil : selectedBucket)
         } catch {
             errorMessage = "Failed to delete task: \(error.localizedDescription)"
             Logger.shared.error("Failed to delete task", category: .ui, error: error)
+        }
+    }
+    
+    /// Optimistically move a task locally to a new bucket to avoid snap-back animations in board view.
+    func optimisticMoveLocal(taskId: UUID, to bucket: TimeBucket) {
+        guard let index = tasksWithLabels.firstIndex(where: { $0.0.id == taskId }) else { return }
+        var pair = tasksWithLabels[index]
+        let oldBucket = pair.0.bucketKey
+        guard oldBucket != bucket else { return }
+        pair.0.bucketKey = bucket
+        // Reset position locally; actual position will be set by reorder logic
+        pair.0.position = 0
+        tasksWithLabels[index] = pair
+        // Update counts optimistically
+        if let old = bucketCounts[oldBucket], old > 0 { bucketCounts[oldBucket] = old - 1 }
+        bucketCounts[bucket] = (bucketCounts[bucket] ?? 0) + 1
+    }
+
+    /// Reorder within a bucket or across buckets: compute position by neighbor midpoints.
+    func reorder(taskId: UUID, to bucket: TimeBucket, targetIndex: Int) async {
+        // Build arrays per bucket, with incomplete tasks only for ordering
+        var columns: [TimeBucket: [(Task, [Label])]] = [:]
+        for (t, ls) in tasksWithLabels {
+            let key = t.bucketKey
+            columns[key, default: []].append((t, ls))
+        }
+        // Filter out completed for ordering calculations
+        func incomplete(_ arr: [(Task, [Label])]) -> [(Task, [Label])] { arr.filter { !$0.0.isCompleted } }
+        let sourceBucket = tasksWithLabels.first(where: { $0.0.id == taskId })?.0.bucketKey
+        guard let source = sourceBucket else { return }
+
+        var sourceArr = incomplete(columns[source] ?? [])
+        var destArr = incomplete(columns[bucket] ?? [])
+
+        // Extract the task
+        guard let srcIdx = sourceArr.firstIndex(where: { $0.0.id == taskId }) else { return }
+        let moving = sourceArr.remove(at: srcIdx)
+        let clampedIndex = max(0, min(targetIndex, destArr.count))
+        destArr.insert(moving, at: clampedIndex)
+
+        // Compute new position using neighbors (stride 1024)
+        let stride: Double = 1024
+        func positionFor(index: Int, in arr: [(Task, [Label])]) -> Double {
+            if arr.isEmpty { return stride }
+            if index == 0 { return (arr.first!.0.position - stride).rounded() }
+            if index >= arr.count - 1 { return (arr.last!.0.position + stride).rounded() }
+            let prev = arr[index - 1].0.position
+            let next = arr[index + 1].0.position
+            let mid = (prev + next) / 2
+            return mid
+        }
+
+        let newPos = positionFor(index: clampedIndex, in: destArr)
+
+        // Optimistically update local state list and reorder array within the destination bucket
+        guard let currentGlobalIdx = tasksWithLabels.firstIndex(where: { $0.0.id == taskId }) else { return }
+        var movingPair = tasksWithLabels.remove(at: currentGlobalIdx)
+        movingPair.0.bucketKey = bucket
+        movingPair.0.position = newPos
+
+        // Build global insertion point relative to incomplete items in destination bucket
+        let destIncompleteEnumerated = tasksWithLabels
+            .enumerated()
+            .filter { $0.element.0.bucketKey == bucket && $0.element.0.isCompleted == false }
+            .map { (idx: $0.offset, task: $0.element.0) }
+
+        let globalInsertIdx: Int = {
+            if clampedIndex <= 0 { return destIncompleteEnumerated.first?.idx ?? tasksWithLabels.endIndex }
+            if clampedIndex >= destIncompleteEnumerated.count { return (destIncompleteEnumerated.last?.idx ?? (tasksWithLabels.endIndex - 1)) + 1 }
+            return destIncompleteEnumerated[clampedIndex].idx
+        }()
+
+        tasksWithLabels.insert(movingPair, at: min(globalInsertIdx, tasksWithLabels.count))
+
+        // Persist remotely
+        do {
+            try await taskUseCases.updateTaskOrderAndBucket(id: taskId, to: bucket, position: newPos, userId: userId)
+        } catch {
+            errorMessage = "Failed to reorder: \(error.localizedDescription)"
+            Logger.shared.error("Failed to reorder task", category: .ui, error: error)
         }
     }
     
@@ -190,7 +346,7 @@ final class TaskListViewModel: ObservableObject {
         await syncService.sync(for: userId)
         // Refresh tasks after sync
         await refreshCounts()
-        await fetchTasks(in: selectedBucket)
+        await fetchTasks(in: isBoardModeActive ? nil : selectedBucket)
     }
     
     func startPeriodicSync() {
