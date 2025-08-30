@@ -23,6 +23,7 @@ final class TaskListViewModel: ObservableObject {
     @Published var editingTask: Task? = nil
     @Published var pendingDelete: Task? = nil
     @Published var isBoardModeActive: Bool = false
+    @AppStorage("sortByDueDate") private var sortByDueDate: Bool = false
     // Filtering
     @Published var activeFilterLabelIds: Set<UUID> = []
     @Published var matchAll: Bool = false
@@ -86,6 +87,22 @@ final class TaskListViewModel: ObservableObject {
         errorMessage = nil
         do {
             var pairs = try await taskUseCases.fetchTasksWithLabels(for: userId, in: bucket)
+            // Optional sort by due date
+            if sortByDueDate {
+                pairs.sort { lhs, rhs in
+                    let lt = lhs.0
+                    let rt = rhs.0
+                    // Incomplete first
+                    if lt.isCompleted != rt.isCompleted { return !lt.isCompleted && rt.isCompleted }
+                    // Earliest due first; nils last
+                    switch (lt.dueAt, rt.dueAt) {
+                    case let (l?, r?): return l < r
+                    case (nil, _?): return false
+                    case (_?, nil): return true
+                    default: return lt.position < rt.position
+                    }
+                }
+            }
             // Apply OR filter by labels if any selected
             if activeFilterLabelIds.isEmpty == false {
                 pairs = pairs.filter { pair in
@@ -199,6 +216,11 @@ final class TaskListViewModel: ObservableObject {
             if let editing = editingTask {
                 let updated = draft.applying(to: editing)
                 try await taskUseCases.updateTask(updated)
+                if let due = updated.dueAt, !updated.isCompleted {
+                    await NotificationsManager.scheduleDueNotification(taskId: updated.id, title: updated.title, dueAt: due)
+                } else {
+                    await NotificationsManager.cancelDueNotification(taskId: updated.id)
+                }
                 // Persist label selections if available
                 if let desired = pendingLabelSelections[updated.id] {
                     try await taskUseCases.setLabels(for: updated.id, to: desired, userId: userId)
@@ -207,6 +229,9 @@ final class TaskListViewModel: ObservableObject {
             } else {
                 let newTask = draft.toNewTask()
                 try await taskUseCases.createTask(newTask)
+                if let due = newTask.dueAt {
+                    await NotificationsManager.scheduleDueNotification(taskId: newTask.id, title: newTask.title, dueAt: due)
+                }
                 if let desired = pendingLabelSelections[newTask.id] {
                     try await taskUseCases.setLabels(for: newTask.id, to: desired, userId: userId)
                     pendingLabelSelections.removeValue(forKey: newTask.id)

@@ -126,6 +126,9 @@ struct SettingsView: View {
                 Section("Features") {
                     Toggle("Enable Subtasks & Rich Descriptions", isOn: $viewModel.featureSubtasksEnabled)
                 }
+                Section("Reminders") {
+                    Toggle("Due date notifications", isOn: Binding(get: { UserDefaults.standard.bool(forKey: "dueNotificationsEnabled") }, set: { UserDefaults.standard.set($0, forKey: "dueNotificationsEnabled") }))
+                }
                 Section("Account") {
                     Button("Sign out") { _Concurrency.Task { try? await authService.signOut() } }
                         .buttonStyle(SecondaryButtonStyle(size: .small))

@@ -47,9 +47,7 @@ struct TaskCard: View {
                         .strikethrough(task.isCompleted)
                         .foregroundColor(task.isCompleted ? Colors.onSurfaceVariant : Colors.onSurface)
                         .lineLimit(2)
-                    if let dueAt = task.dueAt {
-                        DueChip(date: dueAt)
-                    }
+                    if let dueAt = task.dueAt { DueChip(date: dueAt, isOverdue: !task.isCompleted && dueAt < Date()) }
                 }
                 
                 if let description = task.description, !description.isEmpty {
@@ -124,6 +122,7 @@ private struct FlowingChipsView: View {
 
 private struct DueChip: View {
     let date: Date
+    var isOverdue: Bool = false
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "clock")
@@ -132,10 +131,10 @@ private struct DueChip: View {
         .font(.caption2)
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
-        .foregroundColor(Colors.onSurface)
-        .background(Colors.surfaceVariant)
+        .foregroundColor(isOverdue ? .white : Colors.onSurface)
+        .background(isOverdue ? Color.red : Colors.surfaceVariant)
         .clipShape(Capsule())
-        .accessibilityLabel("Due \(DateFormatter.shortDate.string(from: date))")
+        .accessibilityLabel(isOverdue ? "Overdue, was due \(DateFormatter.shortDate.string(from: date))" : "Due \(DateFormatter.shortDate.string(from: date))")
     }
 }
 
