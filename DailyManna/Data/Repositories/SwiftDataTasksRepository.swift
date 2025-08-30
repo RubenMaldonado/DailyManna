@@ -116,13 +116,62 @@ actor SwiftDataTasksRepository: TasksRepository {
     }
     
     func fetchSubTasks(for parentTaskId: UUID) async throws -> [Task] {
-        let descriptor = FetchDescriptor<TaskEntity>(
+        var descriptor = FetchDescriptor<TaskEntity>(
             predicate: #Predicate<TaskEntity> { entity in
                 entity.parentTaskId == parentTaskId && entity.deletedAt == nil
             }
         )
+        descriptor.sortBy = [SortDescriptor(\TaskEntity.position, order: .forward), SortDescriptor(\TaskEntity.createdAt, order: .forward)]
         let entities = try modelContext.fetch(descriptor)
         return entities.map { $0.toDomainModel() }
+    }
+
+    func countSubtasks(parentTaskId: UUID) async throws -> (Int, Int) {
+        let allDescriptor = FetchDescriptor<TaskEntity>(
+            predicate: #Predicate<TaskEntity> { entity in
+                entity.parentTaskId == parentTaskId && entity.deletedAt == nil
+            }
+        )
+        let all = try modelContext.fetch(allDescriptor)
+        let completed = all.filter { $0.isCompleted }.count
+        return (completed, all.count)
+    }
+
+    func reorderSubtasks(parentTaskId: UUID, orderedIds: [UUID]) async throws {
+        // Fetch only the subtasks for this parent ordered by current position
+        var descriptor = FetchDescriptor<TaskEntity>(
+            predicate: #Predicate<TaskEntity> { entity in
+                entity.parentTaskId == parentTaskId && entity.deletedAt == nil && entity.isCompleted == false
+            }
+        )
+        descriptor.sortBy = [SortDescriptor(\TaskEntity.position, order: .forward)]
+        let entities = try modelContext.fetch(descriptor)
+        // Map for quick lookup
+        var idToEntity: [UUID: TaskEntity] = [:]
+        for e in entities { idToEntity[e.id] = e }
+        // Apply new positions using stride spacing
+        var pos: Double = 1024
+        for id in orderedIds {
+            if let ent = idToEntity[id] {
+                ent.position = pos
+                ent.updatedAt = Date()
+                ent.needsSync = true
+                pos += 1024
+            }
+        }
+        try modelContext.save()
+    }
+
+    func nextSubtaskBottomPosition(parentTaskId: UUID) async throws -> Double {
+        var descriptor = FetchDescriptor<TaskEntity>(
+            predicate: #Predicate<TaskEntity> { entity in
+                entity.parentTaskId == parentTaskId && entity.deletedAt == nil && entity.isCompleted == false
+            },
+            sortBy: [SortDescriptor(\TaskEntity.position, order: .reverse)]
+        )
+        let last = try modelContext.fetch(descriptor).first
+        let lastPos = last?.position ?? 0
+        return lastPos + 1024
     }
 
     func countTasks(for userId: UUID, in bucket: TimeBucket, includeCompleted: Bool) async throws -> Int {

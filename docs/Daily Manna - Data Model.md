@@ -6,11 +6,11 @@
 
 * **`id` – UUID (PK)** – Unique user identifier (changed from INT to UUID to match Supabase Auth’s user IDs and allow cross-device uniqueness). In a Supabase implementation, this would correspond to the authenticated user’s ID.
 
-* `email` – TEXT – User’s email address (unique).
+* `email` – TEXT – User’s email address. Nullable in app schema (canonical email lives in `auth.users`).
 
 * `full_name` – TEXT – User’s full name.
 
-* `created_at` – TIMESTAMPTZ – Timestamp of account creation (defaults to current time).
+* `created_at` – TIMESTAMPTZ – Timestamp of account creation (defaults to `now()`).
 
 * **`updated_at` – TIMESTAMPTZ** – Timestamp of last profile update (added for completeness if profile info can change).
 
@@ -37,7 +37,7 @@
 
 * **`bucket_key` – TEXT** (FK → TimeBuckets.key) – Time bucket category to which this task belongs. (Replaces the numeric `bucket_id` with a stable text key. Ensures the task is in one of the five fixed buckets; e.g. a task can be in “THIS_WEEK” or “ROUTINES”. A CHECK constraint enforces valid values if not using an explicit foreign key.)
 
-* **`position` – DOUBLE PRECISION** – Ordering key within a bucket for incomplete tasks. The client assigns values using midpoint insertion with an initial stride of 1024, allowing precise drag-and-drop without mass renumbering. New tasks are appended to the bottom (largest position). Completed tasks are rendered by `completed_at` DESC and do not participate in this ordering.
+* **`position` – DOUBLE PRECISION (default 0)** – Ordering key within a bucket for incomplete tasks. The client assigns values using midpoint insertion with an initial stride of 1024, allowing precise drag-and-drop without mass renumbering. New tasks are appended to the bottom (largest position). Completed tasks are rendered by `completed_at` DESC and do not participate in this ordering.
 
 * `parent_task_id` – UUID, nullable (FK → Tasks.id) – Reference to a parent task for sub-tasks. (`parent_task_id` remains for hierarchical tasks; now using UUID type. Allows tasks to have optional sub-tasks. If set, this task is a sub-task of another task.)
 
@@ -85,7 +85,9 @@ Additionally, an index on `parent_task_id` is recommended to quickly query sub-t
 
 * `name` – TEXT – Name of the label (e.g. `"@work"`, `"@personal"`). Ideally unique per user to avoid duplicates (we can enforce a **unique index on (user\_id, name)**).
 
-* `color` – TEXT – Hex color code or identifier for the label (for UI display, e.g. "\#FF0000").
+* `color` – TEXT – Hex color code or identifier for the label (for UI display, e.g. "\#FF0000"). Defaults to `#007AFF`.
+
+* `name_key` – TEXT (generated, nullable) – `lower(trim(both from name))` to support case-insensitive lookups and de-duplication.
 
 * **`created_at` – TIMESTAMPTZ** – Timestamp when the label was created.
 
@@ -105,23 +107,25 @@ Additionally, an index on `parent_task_id` is recommended to quickly query sub-t
 
 ## **TaskLabels (Task-Label Mapping)**
 
+Current Supabase schema uses a surrogate primary key and includes timestamps:
+
+* **`id` – UUID (PK)** – Defaults to `gen_random_uuid()`.
+
 * `task_id` – UUID (FK → Tasks.id) – References a task.
 
 * `label_id` – UUID (FK → Labels.id) – References a label.
 
-* *(Optional:* `user_id` – UUID – References the user) – This field is not strictly required because `task_id` and `label_id` already indirectly link to a user. However, including `user_id` (and enforcing it matches the task’s and label’s owner) can simplify RLS policies and ensure consistency – i.e. prevent linking a task to someone else’s label.）
+* `user_id` – UUID (FK → Users.id) – Owner; simplifies RLS.
 
-* **Primary Key:** *(task\_id, label\_id)* composite PK – This prevents duplicate entries (a task can only have a given label once).
+* `created_at` – TIMESTAMPTZ (default `now()`).
 
-* **Indexes:** An index on `task_id` and another on `label_id` speed up queries filtering by task or by label. For example, to fetch all labels associated with a task, or to find all tasks that have a certain label. (Composite PK inherently covers both columns, but single-column indexes are still useful for one-sided lookups.)
+* `updated_at` – TIMESTAMPTZ (default `now()`).
 
-**Rationale:** **TaskLabels** is the join table implementing the many-to-many relationship between tasks and labels. This design allows any task to be tagged with multiple labels and any label to tag multiple tasks, as required by the product’s flexible filtering feature. Storing just foreign keys keeps it normalized. We ensure data integrity by:
+* `deleted_at` – TIMESTAMPTZ, nullable.
 
-* Enforcing a composite primary key or a unique constraint so the same task-label pair isn’t entered twice.
+**Indexes & Uniqueness:** Maintain a unique index on `(task_id, label_id)` to prevent duplicate links, even though the table uses a surrogate `id` as the primary key. Additional indexes on `task_id`, `label_id`, and optionally `(user_id, label_id)` support common lookups.
 
-* (If using `user_id` here) ensuring that on insert, the `user_id` matches the task’s and label’s owner (this can be done via a CHECK or in application logic) so that users cannot mix data across accounts. If we exclude `user_id` in this table, we rely on foreign key relationships plus RLS policies on the Tasks and Labels tables (Supabase can write a policy like: allow if `EXISTS (SELECT 1 FROM tasks t WHERE t.id = task_id AND t.user_id = auth.uid())` and similarly for labels). Including `user_id` simply makes policies easier (policy: `task_labels.user_id = auth.uid()`) at the cost of a tiny redundancy.
-
-* When a label is deleted (has `deleted_at` set), we should also remove or mark related TaskLabels. Typically, we can cascade delete these join records (since they have no meaning if either side is “deleted”). This can be done with a foreign key ON DELETE CASCADE, or handled in application logic when a label is deleted/tombstoned.
+**Rationale:** **TaskLabels** implements the many-to-many relation between tasks and labels. Including `user_id` keeps RLS straightforward (`task_labels.user_id = auth.uid()`) and aligns with the rest of the schema. Timestamps support sync and troubleshooting.
 
 ## **Indexes & Constraints**
 

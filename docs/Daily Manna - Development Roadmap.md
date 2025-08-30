@@ -75,7 +75,7 @@ This document outlines a prioritized, iterative development approach for Daily M
 - [x] Create basic repository implementations for local storage
 - [x] Implement UUID generation for offline-first approach
 
-### Epic 0.4: Supabase MCP Server Integration
+### Epic 0.4: Supabase MCP Server Integration | COMPLETED
 **Priority**: High
 **Estimated Effort**: 0.5–1 week
 **Goal**: Enable AI-assisted development by integrating the official Supabase MCP server so we can design/modify database schema, manage projects/branches, run SQL, fetch config, and automate Supabase tasks directly from Cursor.
@@ -92,23 +92,23 @@ This document outlines a prioritized, iterative development approach for Daily M
 - As a developer, I can retrieve logs to debug integration issues without leaving Cursor.
 
 **Acceptance Criteria**:
-- [ ] MCP server configured in `.cursor/mcp.json` with `@supabase/mcp-server-supabase@latest` and PAT.
-- [ ] PAT is stored securely and not committed; add `.gitignore`/secrets hygiene note.
-- [ ] Step-by-step setup doc created: `docs/Epic 0.4 - Supabase MCP Setup - Cursor.md` (Cursor on macOS) with:
+- [x] MCP server configured in `.cursor/mcp.json` with `@supabase/mcp-server-supabase@latest` and PAT.
+- [x] PAT is stored securely and not committed; add `.gitignore`/secrets hygiene note.
+- [x] Step-by-step setup doc created: `docs/Epic 0.4 - Supabase MCP Setup - Cursor.md` (Cursor on macOS) with:
   - Installing MCP server via `npx` and adding JSON.
   - Creating a Supabase Personal Access Token; scoping guidance and rotation.
   - Verifying tool discovery and a smoke test (e.g., `list_tables`, `execute_sql`).
   - Notes for Windows/Linux JSON variants.
-- [ ] Working examples documented for common MCP activities:
+- [x] Working examples documented for common MCP activities:
   - Design tables and track via migrations (create/alter/drop within a dev branch).
   - Execute SQL for reports and data checks (read-only and cautious writes).
   - Create and manage database branches; pause/restore projects safely.
   - Fetch project configuration (URL, anon key) for local config.
   - Retrieve logs for debugging (auth, database, realtime) during development.
   - Generate TypeScript types (for web tooling/docs).
-- [ ] Safety guidance included: prefer branches, avoid destructive ops in prod, confirmation prompts, rollback patterns.
-- [ ] "How we’ll use MCP in Daily Manna" section mapping activities to current epics (e.g., Labels schema, RLS/policies, triggers, migrations).
-- [ ] Cross-links added between this epic and the setup doc.
+- [x] Safety guidance included: prefer branches, avoid destructive ops in prod, confirmation prompts, rollback patterns.
+- [x] "How we’ll use MCP in Daily Manna" section mapping activities to current epics (e.g., Labels schema, RLS/policies, triggers, migrations).
+- [x] Cross-links added between this epic and the setup doc.
 
 **Milestones**:
 - Day 1: Configure `.cursor/mcp.json`, create PAT, verify connection; smoke-test tools.
@@ -223,13 +223,13 @@ This document outlines a prioritized, iterative development approach for Daily M
 - As a user, I can manage my label library
 
 **Acceptance Criteria**:
-- [ ] Implement label creation and management
-- [ ] Add label assignment to tasks (many-to-many)
-- [ ] Create label filtering UI
-- [ ] Implement label color system
-- [ ] Add label chips to task display
-- [ ] Create saved filter views
-- [ ] Sync label data across devices
+- [x] Implement label creation and management
+- [x] Add label assignment to tasks (many-to-many)
+- [x] Create label filtering UI
+- [x] Implement label color system
+- [x] Add label chips to task display
+- [x] Create saved filter views
+- [x] Sync label data across devices
 
 #### Implementation Plan
 - **Database & RLS**
@@ -282,12 +282,12 @@ This document outlines a prioritized, iterative development approach for Daily M
 - As a user, I can track progress on complex tasks
 
 **Acceptance Criteria**:
-- [ ] Implement hierarchical task structure (parent/child)
-- [ ] Create subtask UI with progress indicators
-- [ ] Add rich text editing for descriptions (Markdown support)
-- [ ] Implement subtask completion logic
-- [ ] Add subtask drag-and-drop reordering
-- [ ] Sync subtask relationships
+- [x] Implement hierarchical task structure (parent/child)
+- [x] Create subtask UI with progress indicators
+- [x] Add rich text editing for descriptions (Markdown support)
+- [x] Implement subtask completion logic
+- [x] Add subtask drag-and-drop reordering
+- [x] Sync subtask relationships
 
 ### Epic 2.3: Due Dates & Scheduling
 **Priority**: Medium

@@ -10,6 +10,8 @@ import Supabase
 
 final class SupabaseTasksRepository: RemoteTasksRepository {
     private let client: SupabaseClient
+    private var tasksChannel: RealtimeChannelV2?
+    private var tasksChangesTask: _Concurrency.Task<Void, Never>?
     
     init(client: SupabaseClient = SupabaseConfig.shared.client) {
         self.client = client
@@ -114,15 +116,34 @@ final class SupabaseTasksRepository: RemoteTasksRepository {
         return syncedTasks
     }
     
-    // MARK: - Realtime (no-op baseline)
+    // MARK: - Realtime (hint-only)
     func startRealtime(userId: UUID) async throws {
-        // In Epic 1.3 baseline, we enable Realtime at the table level in Studio.
-        // Here we could subscribe to postgres_changes. Left as no-op stub.
         Logger.shared.info("Realtime start requested for tasks (user: \(userId))", category: .data)
+        // Subscribe to table changes for hinting sync using RealtimeChannelV2 async stream API
+        let channel = client.channel("dm_tasks_\(userId.uuidString)")
+        self.tasksChannel = channel
+        let changes = await channel.postgresChange(AnyAction.self, schema: "public", table: "tasks", filter: .eq("user_id", value: userId.uuidString))
+        do {
+            try await channel.subscribeWithError()
+        } catch {
+            Logger.shared.error("Realtime subscribe failed", category: .data, error: error)
+        }
+        // Consume the async stream and post a single debounced notification for any change
+        tasksChangesTask?.cancel()
+        tasksChangesTask = _Concurrency.Task { @MainActor in
+            for await _ in changes {
+                NotificationCenter.default.post(name: Notification.Name("dm.remote.tasks.changed"), object: nil)
+            }
+        }
     }
     
     func stopRealtime() async {
         Logger.shared.info("Realtime stop requested for tasks", category: .data)
+        tasksChangesTask?.cancel()
+        tasksChangesTask = nil
+        // Best-effort unsubscribe if available
+        _ = tasksChannel
+        tasksChannel = nil
     }
     
     func deleteAll(for userId: UUID) async throws {

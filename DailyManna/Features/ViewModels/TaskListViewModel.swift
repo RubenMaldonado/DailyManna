@@ -12,6 +12,7 @@ import SwiftUI
 @MainActor
 final class TaskListViewModel: ObservableObject {
     @Published var tasksWithLabels: [(Task, [Label])] = []
+    @Published var subtaskProgressByParent: [UUID: (completed: Int, total: Int)] = [:]
     @Published var isLoading: Bool = false
     @Published var errorMessage: String? = nil
     @Published var isSyncing: Bool = false
@@ -51,7 +52,9 @@ final class TaskListViewModel: ObservableObject {
             guard let self else { return }
             guard let taskId = note.userInfo?["taskId"] as? UUID,
                   let ids = note.userInfo?["labelIds"] as? [UUID] else { return }
-            self.pendingLabelSelections[taskId] = Set(ids)
+            _Concurrency.Task { @MainActor in
+                self.pendingLabelSelections[taskId] = Set(ids)
+            }
         }
         
         // Start observing sync state if available (Combine to avoid Task name clash)
@@ -92,11 +95,33 @@ final class TaskListViewModel: ObservableObject {
             }
             // Apply label filtering if any active
             self.tasksWithLabels = pairs
+            // Load subtask progress for visible items incrementally
+            let parentIds = pairs.map { $0.0.id }
+            await loadSubtaskProgressIncremental(for: parentIds)
         } catch {
             errorMessage = "Failed to fetch tasks: \(error.localizedDescription)"
             Logger.shared.error("Failed to fetch tasks", category: .ui, error: error)
         }
         isLoading = false
+    }
+
+    private func loadSubtaskProgressIncremental(for parentIds: [UUID]) async {
+        await withTaskGroup(of: (UUID, (Int, Int)?).self) { group in
+            for pid in parentIds {
+                group.addTask { [taskUseCases] in
+                    if let progress = try? await taskUseCases.getSubtaskProgress(parentTaskId: pid) {
+                        return (pid, progress)
+                    }
+                    return (pid, nil)
+                }
+            }
+            var map: [UUID: (Int, Int)] = [:]
+            for await (pid, progress) in group {
+                if let p = progress { map[pid] = p }
+            }
+            // Merge to preserve any cached values for tasks still off-screen
+            self.subtaskProgressByParent.merge(map) { _, new in new }
+        }
     }
 
     func clearFilters() {
@@ -110,9 +135,9 @@ final class TaskListViewModel: ObservableObject {
         selectedBucket = bucket
         _Concurrency.Task { [weak self] in
             guard let self else { return }
-            async let _ = self.fetchTasks(in: bucket)
-            async let _ = self.refreshCounts()
-            _ = await ()
+            async let fetch: Void = self.fetchTasks(in: bucket)
+            async let counts: Void = self.refreshCounts()
+            _ = await (fetch, counts)
         }
     }
 
@@ -146,7 +171,11 @@ final class TaskListViewModel: ObservableObject {
 
     func toggleTaskCompletion(task: Task, refreshIn filter: TimeBucket?) async {
         do {
-            try await taskUseCases.toggleTaskCompletion(id: task.id, userId: userId)
+            if let progress = subtaskProgressByParent[task.id], progress.total > 0 {
+                try await taskUseCases.toggleParentCompletionCascade(parentId: task.id)
+            } else {
+                try await taskUseCases.toggleTaskCompletion(id: task.id, userId: userId)
+            }
             await refreshCounts()
             await fetchTasks(in: filter)
         } catch {

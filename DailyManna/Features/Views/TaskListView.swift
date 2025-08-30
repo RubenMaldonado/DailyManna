@@ -8,19 +8,6 @@
 
 import SwiftUI
 import UniformTypeIdentifiers
-private struct DraggableTaskID: Transferable {
-    let id: UUID
-    static var transferRepresentation: some TransferRepresentation {
-        DataRepresentation(contentType: .plainText, exporting: { value in
-            value.id.uuidString.data(using: .utf8) ?? Data()
-        }, importing: { data in
-            guard let str = String(data: data, encoding: .utf8), let uuid = UUID(uuidString: str) else {
-                throw URLError(.cannotDecodeContentData)
-            }
-            return DraggableTaskID(id: uuid)
-        })
-    }
-}
 
 /// Simple view to demonstrate Epic 0.1 architecture is working
 /// This is a minimal UI focused on proving the infrastructure
@@ -131,6 +118,7 @@ struct TaskListView: View {
                 TasksListView(
                     bucket: viewModel.selectedBucket,
                     tasksWithLabels: viewModel.tasksWithLabels,
+                    subtaskProgressByParent: viewModel.subtaskProgressByParent,
                     onToggle: { task in _Concurrency.Task { await viewModel.toggleTaskCompletion(task: task) } },
                     onEdit: { task in viewModel.presentEditForm(task: task) },
                     onMove: { taskId, bucket in _Concurrency.Task { await viewModel.move(taskId: taskId, to: bucket) } },
@@ -153,6 +141,7 @@ struct TaskListView: View {
             TasksListView(
                 bucket: viewModel.selectedBucket,
                 tasksWithLabels: viewModel.tasksWithLabels,
+                subtaskProgressByParent: viewModel.subtaskProgressByParent,
                 onToggle: { task in _Concurrency.Task { await viewModel.toggleTaskCompletion(task: task) } },
                 onEdit: { task in viewModel.presentEditForm(task: task) },
                 onMove: { taskId, bucket in _Concurrency.Task { await viewModel.move(taskId: taskId, to: bucket) } },
@@ -175,6 +164,7 @@ private struct InlineBoardView: View {
                     InlineBucketColumn(
                         bucket: bucket,
                         tasksWithLabels: viewModel.tasksWithLabels.filter { $0.0.bucketKey == bucket },
+                        subtaskProgressByParent: viewModel.subtaskProgressByParent,
                         onDropTask: { taskId, targetIndex in
                             _Concurrency.Task {
                                 await viewModel.reorder(taskId: taskId, to: bucket, targetIndex: targetIndex)
@@ -197,6 +187,7 @@ private struct InlineBoardView: View {
 private struct InlineBucketColumn: View {
     let bucket: TimeBucket
     let tasksWithLabels: [(Task, [Label])]
+    let subtaskProgressByParent: [UUID: (completed: Int, total: Int)]
     let onDropTask: (UUID, Int) -> Void
     let onToggle: (Task) -> Void
     let onMove: (UUID, TimeBucket) -> Void
@@ -219,7 +210,12 @@ private struct InlineBucketColumn: View {
                                 .frame(height: 2)
                                 .padding(.vertical, 2)
                         }
-                        TaskCard(task: pair.0, labels: pair.1) { onToggle(pair.0) }
+                        TaskCard(
+                            task: pair.0,
+                            labels: pair.1,
+                            onToggleCompletion: { onToggle(pair.0) },
+                            subtaskProgress: subtaskProgressByParent[pair.0.id]
+                        )
                             .contextMenu {
                                 Menu("Move to") {
                                     ForEach(TimeBucket.allCases.sorted { $0.sortOrder < $1.sortOrder }) { dest in
@@ -647,9 +643,10 @@ private struct DebugSettingsButton: View {
 }
 #endif
 
-private struct TasksListView: View {
+private struct Deprecated_TasksListView: View { // kept temporarily if referenced elsewhere
     let bucket: TimeBucket
     let tasksWithLabels: [(Task, [Label])]
+    let subtaskProgressByParent: [UUID: (completed: Int, total: Int)]
     let onToggle: (Task) -> Void
     let onEdit: (Task) -> Void
     let onMove: (UUID, TimeBucket) -> Void
@@ -670,7 +667,7 @@ private struct TasksListView: View {
                             .frame(height: 2)
                             .padding(.vertical, 2)
                     }
-                    TaskRowView(task: pair.0, labels: pair.1, onToggle: onToggle, onEdit: onEdit, onMove: onMove, onDelete: onDelete)
+                    TaskRowView(task: pair.0, labels: pair.1, subtaskProgress: subtaskProgressByParent[pair.0.id], onToggle: onToggle, onEdit: onEdit, onMove: onMove, onDelete: onDelete)
                         .draggable(DraggableTaskID(id: pair.0.id))
                         .background(GeometryReader { proxy in
                             Color.clear.preference(key: ListRowFramePreferenceKey.self, value: [pair.0.id: proxy.frame(in: .named("listDrop"))])
@@ -732,13 +729,14 @@ private struct ListRowFramePreferenceKey: PreferenceKey {
 private struct TaskRowView: View {
     let task: Task
     let labels: [Label]
+    let subtaskProgress: (completed: Int, total: Int)?
     let onToggle: (Task) -> Void
     let onEdit: (Task) -> Void
     let onMove: (UUID, TimeBucket) -> Void
     let onDelete: (Task) -> Void
     
     var body: some View {
-        TaskCard(task: task, labels: labels) { onToggle(task) }
+        TaskCard(task: task, labels: labels, onToggleCompletion: { onToggle(task) }, subtaskProgress: subtaskProgress)
             .contextMenu {
                 Button("Edit") { onEdit(task) }
                 Menu("Move to") {

@@ -30,6 +30,15 @@ public protocol TasksRepository: Sendable {
     /// Fetches sub-tasks for a given parent task
     func fetchSubTasks(for parentTaskId: UUID) async throws -> [Task]
 
+    /// Returns (completed, total) counts for a parent's subtasks
+    func countSubtasks(parentTaskId: UUID) async throws -> (Int, Int)
+
+    /// Reorders a parent's subtasks by applying the provided ordered IDs to positions
+    func reorderSubtasks(parentTaskId: UUID, orderedIds: [UUID]) async throws
+
+    /// Computes the next bottom position for a parent's incomplete subtasks
+    func nextSubtaskBottomPosition(parentTaskId: UUID) async throws -> Double
+
     /// Counts tasks for a user and bucket. Excludes completed by default.
     func countTasks(for userId: UUID, in bucket: TimeBucket, includeCompleted: Bool) async throws -> Int
     

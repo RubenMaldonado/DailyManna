@@ -19,6 +19,9 @@ final class SyncService: ObservableObject {
     private let localLabelsRepository: LabelsRepository
     private let remoteLabelsRepository: RemoteLabelsRepository
     private let syncStateStore: SyncStateStore
+    private var realtimeObserver: NSObjectProtocol?
+    private var realtimeDebounceScheduled = false
+    private var currentUserId: UUID?
     
     init(
         localTasksRepository: TasksRepository,
@@ -224,9 +227,11 @@ final class SyncService: ObservableObject {
     /// Performs initial sync for a user
     func performInitialSync(for userId: UUID) async {
         Logger.shared.info("Performing initial sync", category: .sync)
+        self.currentUserId = userId
         // Start realtime (no-op stubs in Epic 1.3)
         try? await remoteTasksRepository.startRealtime(userId: userId)
         try? await remoteLabelsRepository.startRealtime(userId: userId)
+        startRealtimeHints(for: userId)
         await sync(for: userId)
     }
     
@@ -239,6 +244,28 @@ final class SyncService: ObservableObject {
                 guard let self else { return }
                 _Concurrency.Task { await self.sync(for: userId) }
             }
+    }
+
+    // MARK: - Realtime hint handling
+    private func startRealtimeHints(for userId: UUID) {
+        // Debounced sync on change notifications emitted by remote repositories
+        realtimeObserver = NotificationCenter.default.addObserver(forName: Notification.Name("dm.remote.tasks.changed"), object: nil, queue: .main) { [weak self] _ in
+            // Hop to the main actor explicitly to safely touch actor-isolated state in Swift 6
+            _Concurrency.Task { @MainActor [weak self] in
+                guard let self else { return }
+                guard self.currentUserId == userId else { return }
+                if self.realtimeDebounceScheduled { return }
+                self.realtimeDebounceScheduled = true
+                try? await _Concurrency.Task.sleep(nanoseconds: 500_000_000) // 0.5s debounce
+                self.realtimeDebounceScheduled = false
+                await self.sync(for: userId)
+            }
+        }
+    }
+
+    /// Resets saved sync checkpoints for a user
+    func resetSyncState(for userId: UUID) async throws {
+        try await syncStateStore.reset(userId: userId)
     }
     
     // MARK: - Retry helper

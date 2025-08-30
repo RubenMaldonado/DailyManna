@@ -11,11 +11,13 @@ struct TaskCard: View {
     let task: Task
     let labels: [Label]
     var onToggleCompletion: (() -> Void)?
+    var subtaskProgress: (completed: Int, total: Int)? = nil
     
-    init(task: Task, labels: [Label], onToggleCompletion: (() -> Void)? = nil) {
+    init(task: Task, labels: [Label], onToggleCompletion: (() -> Void)? = nil, subtaskProgress: (completed: Int, total: Int)? = nil) {
         self.task = task
         self.labels = labels
         self.onToggleCompletion = onToggleCompletion
+        self.subtaskProgress = subtaskProgress
     }
     
     var body: some View {
@@ -55,6 +57,19 @@ struct TaskCard: View {
                         .style(Typography.body)
                         .foregroundColor(Colors.onSurfaceVariant)
                         .lineLimit(2)
+                }
+                if let progress = subtaskProgress, progress.total > 0 {
+                    HStack(spacing: 6) {
+                        ProgressView(value: Double(progress.completed), total: Double(progress.total))
+                            .progressViewStyle(.linear)
+                            .tint(Colors.primary)
+                        Text("\(progress.completed)/\(progress.total)")
+                            .style(Typography.caption)
+                            .foregroundColor(Colors.onSurfaceVariant)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Subtasks completed")
+                    .accessibilityValue("\(progress.completed) of \(progress.total)")
                 }
                 
                 if !labels.isEmpty {

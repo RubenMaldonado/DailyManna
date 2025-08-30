@@ -11,6 +11,8 @@ import SwiftUI
 final class SettingsViewModel: ObservableObject {
     @Published var isWorking: Bool = false
     @Published var statusMessage: String? = nil
+    @Published var featureSubtasksEnabled: Bool = true
+    // Removed rich text feature flag
     
     private let tasksRepository: TasksRepository
     private let labelsRepository: LabelsRepository
@@ -95,7 +97,7 @@ final class SettingsViewModel: ObservableObject {
         do {
             try await labelsRepository.deleteAll(for: userId)
             try await tasksRepository.deleteAll(for: userId)
-            try await syncService.syncStateStore.reset(userId: userId)
+            try await syncService.resetSyncState(for: userId)
             await syncService.sync(for: userId)
             statusMessage = "Local store reset — pulled from server"
         } catch {
@@ -121,6 +123,9 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Features") {
+                    Toggle("Enable Subtasks & Rich Descriptions", isOn: $viewModel.featureSubtasksEnabled)
+                }
                 Section("Account") {
                     Button("Sign out") { _Concurrency.Task { try? await authService.signOut() } }
                         .buttonStyle(SecondaryButtonStyle(size: .small))

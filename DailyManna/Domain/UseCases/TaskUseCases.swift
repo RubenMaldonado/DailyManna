@@ -136,6 +136,83 @@ public final class TaskUseCases {
         return subTasks.filter { !$0.isDeleted }
     }
 
+    /// Returns (completed, total) subtask counts for a given parent
+    public func getSubtaskProgress(parentTaskId: UUID) async throws -> (Int, Int) {
+        try await tasksRepository.countSubtasks(parentTaskId: parentTaskId)
+    }
+
+    // MARK: - Subtasks
+    /// Creates a new subtask under a parent with next bottom position
+    public func createSubtask(parentId: UUID, userId: UUID, title: String) async throws -> Task {
+        guard let parent = try await tasksRepository.fetchTask(by: parentId) else {
+            throw DomainError.notFound(parentId.uuidString)
+        }
+        let position = try await tasksRepository.nextSubtaskBottomPosition(parentTaskId: parentId)
+        var sub = Task(
+            userId: userId,
+            bucketKey: parent.bucketKey,
+            position: position,
+            parentTaskId: parentId,
+            title: title.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        sub.updatedAt = Date()
+        sub.needsSync = true
+        try await tasksRepository.createTask(sub)
+        return sub
+    }
+
+    /// Reorders a parent's incomplete subtasks using ordered IDs
+    public func reorderSubtasks(parentId: UUID, orderedIds: [UUID]) async throws {
+        try await tasksRepository.reorderSubtasks(parentTaskId: parentId, orderedIds: orderedIds)
+    }
+
+    /// Toggles subtask completion and updates parent completion if all children complete
+    public func toggleSubtaskCompletion(id: UUID) async throws {
+        guard var sub = try await tasksRepository.fetchTask(by: id) else { throw DomainError.notFound(id.uuidString) }
+        sub.isCompleted.toggle()
+        sub.completedAt = sub.isCompleted ? Date() : nil
+        sub.updatedAt = Date()
+        sub.needsSync = true
+        try await tasksRepository.updateTask(sub)
+
+        if let parentId = sub.parentTaskId {
+            let (completed, total) = try await tasksRepository.countSubtasks(parentTaskId: parentId)
+            if let parent = try await tasksRepository.fetchTask(by: parentId) {
+                var updatedParent = parent
+                let shouldBeComplete = (total > 0 && completed == total)
+                if updatedParent.isCompleted != shouldBeComplete {
+                    updatedParent.isCompleted = shouldBeComplete
+                    updatedParent.completedAt = shouldBeComplete ? Date() : nil
+                    updatedParent.updatedAt = Date()
+                    updatedParent.needsSync = true
+                    try await tasksRepository.updateTask(updatedParent)
+                }
+            }
+        }
+    }
+
+    /// Cascades parent completion toggle to all subtasks
+    public func toggleParentCompletionCascade(parentId: UUID) async throws {
+        guard var parent = try await tasksRepository.fetchTask(by: parentId) else { throw DomainError.notFound(parentId.uuidString) }
+        let newState = !parent.isCompleted
+        parent.isCompleted = newState
+        parent.completedAt = newState ? Date() : nil
+        parent.updatedAt = Date()
+        parent.needsSync = true
+        try await tasksRepository.updateTask(parent)
+
+        let children = try await tasksRepository.fetchSubTasks(for: parentId).filter { !$0.isDeleted }
+        for var child in children {
+            if child.isCompleted != newState {
+                child.isCompleted = newState
+                child.completedAt = newState ? Date() : nil
+                child.updatedAt = Date()
+                child.needsSync = true
+                try await tasksRepository.updateTask(child)
+            }
+        }
+    }
+
     // MARK: - Counts
     /// Returns the number of tasks in a specific bucket for the user. Excludes completed by default.
     public func countTasks(for userId: UUID, in bucket: TimeBucket, includeCompleted: Bool = false) async throws -> Int {
