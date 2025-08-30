@@ -97,6 +97,19 @@ struct TaskListView: View {
                 _Concurrency.Task { await viewModel.save(draft: draft) }
             } onCancel: {}
         }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("dm.open.task"))) { note in
+            if let id = note.userInfo?["taskId"] as? UUID {
+                if let bucketStr = note.userInfo?["bucket_key"] as? String, let bucket = TimeBucket(rawValue: bucketStr) {
+                    viewModel.selectedBucket = bucket
+                }
+                _Concurrency.Task {
+                    await viewModel.fetchTasks(in: viewModel.selectedBucket)
+                    if let task = viewModel.tasksWithLabels.first(where: { $0.0.id == id })?.0 {
+                        viewModel.presentEditForm(task: task)
+                    }
+                }
+            }
+        }
         .alert("Delete Task?", isPresented: Binding(get: { viewModel.pendingDelete != nil }, set: { if !$0 { viewModel.pendingDelete = nil } })) {
             Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive) { _Concurrency.Task { await viewModel.performDelete() } }

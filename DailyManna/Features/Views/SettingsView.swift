@@ -128,6 +128,12 @@ struct SettingsView: View {
                 }
                 Section("Reminders") {
                     Toggle("Due date notifications", isOn: Binding(get: { UserDefaults.standard.bool(forKey: "dueNotificationsEnabled") }, set: { UserDefaults.standard.set($0, forKey: "dueNotificationsEnabled") }))
+                    if #available(iOS 15.0, *) {
+                        Button("Request Permission") {
+                            _Concurrency.Task { await NotificationsManager.requestAuthorizationIfNeeded() }
+                        }
+                        .buttonStyle(SecondaryButtonStyle(size: .small))
+                    }
                 }
                 Section("Account") {
                     Button("Sign out") { _Concurrency.Task { try? await authService.signOut() } }

@@ -217,7 +217,7 @@ final class TaskListViewModel: ObservableObject {
                 let updated = draft.applying(to: editing)
                 try await taskUseCases.updateTask(updated)
                 if let due = updated.dueAt, !updated.isCompleted {
-                    await NotificationsManager.scheduleDueNotification(taskId: updated.id, title: updated.title, dueAt: due)
+                    await NotificationsManager.scheduleDueNotification(taskId: updated.id, title: updated.title, dueAt: due, bucketKey: updated.bucketKey.rawValue)
                 } else {
                     await NotificationsManager.cancelDueNotification(taskId: updated.id)
                 }
@@ -230,7 +230,7 @@ final class TaskListViewModel: ObservableObject {
                 let newTask = draft.toNewTask()
                 try await taskUseCases.createTask(newTask)
                 if let due = newTask.dueAt {
-                    await NotificationsManager.scheduleDueNotification(taskId: newTask.id, title: newTask.title, dueAt: due)
+                    await NotificationsManager.scheduleDueNotification(taskId: newTask.id, title: newTask.title, dueAt: due, bucketKey: newTask.bucketKey.rawValue)
                 }
                 if let desired = pendingLabelSelections[newTask.id] {
                     try await taskUseCases.setLabels(for: newTask.id, to: desired, userId: userId)

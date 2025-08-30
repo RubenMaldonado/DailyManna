@@ -45,6 +45,7 @@ struct DailyMannaApp: App {
             }
             .task {
                 await authService.runAuthLifecycle()
+                NotificationRouter.shared.register()
             }
         }
         .modelContainer(getModelContainer())
