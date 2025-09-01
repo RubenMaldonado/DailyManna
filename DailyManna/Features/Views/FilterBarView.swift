@@ -2,15 +2,19 @@
 //  FilterBarView.swift
 //  DailyManna
 //
-//  Inline labels filter bar with chips, add-field, match mode, and clear.
+//  Inline labels filter bar with chips, add-field, saved filters, and options.
 //
 
 import SwiftUI
 
 struct FilterBarView: View {
     @ObservedObject var vm: LabelsFilterViewModel
+    var onSelectionChanged: ((Set<UUID>, Bool) -> Void)? = nil
     @FocusState private var isAddFocused: Bool
     @State private var draftName: String = ""
+    @State private var savedFilters: [SavedFilter] = []
+    @State private var showSaveSheet = false
+    @State private var saveName: String = ""
     
     var body: some View {
         VStack(spacing: 8) {
@@ -32,6 +36,27 @@ struct FilterBarView: View {
                     .focused($isAddFocused)
                     .onSubmit { createOrToggle() }
                     .onChange(of: draftName) { _, _ in /* live suggestions shown below */ }
+                Menu("Saved") {
+                    if savedFilters.isEmpty { Text("No saved filters") }
+                    ForEach(savedFilters) { filter in
+                        Button(filter.name) {
+                            vm.selectedLabelIds = Set(filter.labelIds)
+                            vm.matchAll = filter.matchAll
+                        }
+                    }
+                    Divider()
+                    Button("Save Current…") { showSaveSheet = true }
+                }
+                .menuStyle(.borderlessButton)
+
+                Menu("Options") {
+                    Toggle(isOn: $vm.matchAll) { Text("Match all") }
+                    if vm.selectedLabelIds.isEmpty == false {
+                        Divider()
+                        Button("Clear") { vm.clear() }
+                    }
+                }
+                .menuStyle(.borderlessButton)
             }
             // Suggestions dropdown (inline, non-blocking)
             if draftName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
@@ -48,7 +73,10 @@ struct FilterBarView: View {
         }
         .surfaceStyle(.chrome)
         .padding(.vertical, 4)
-        .task { await vm.load() }
+        .task { await vm.load(); await loadSaved() }
+        .onChange(of: vm.selectedLabelIds) { _, ids in onSelectionChanged?(ids, vm.matchAll) }
+        .onChange(of: vm.matchAll) { _, _ in onSelectionChanged?(vm.selectedLabelIds, vm.matchAll) }
+        .sheet(isPresented: $showSaveSheet) { saveSheet }
     }
     
     private func createOrToggle() {
@@ -61,6 +89,42 @@ struct FilterBarView: View {
         }
         draftName = ""
         isAddFocused = true
+    }
+}
+private extension FilterBarView {
+    func loadSaved() async {
+        let deps = Dependencies.shared
+        if let repo: SavedFiltersRepository = try? deps.resolve(type: SavedFiltersRepository.self) {
+            savedFilters = (try? await repo.list(for: vm.userId)) ?? []
+        }
+    }
+
+    var saveSheet: some View {
+        VStack(spacing: 12) {
+            Text("Save Filter").font(.headline)
+            TextField("Name", text: $saveName).textFieldStyle(.roundedBorder)
+            HStack {
+                Button("Cancel") { showSaveSheet = false }
+                Spacer()
+                Button("Save") {
+                    let deps = Dependencies.shared
+                    if let repo: SavedFiltersRepository = try? deps.resolve(type: SavedFiltersRepository.self) {
+                        _Concurrency.Task {
+                            try? await repo.create(name: saveName.trimmingCharacters(in: .whitespacesAndNewlines),
+                                                   labelIds: Array(vm.selectedLabelIds),
+                                                   matchAll: vm.matchAll,
+                                                   userId: vm.userId)
+                            await loadSaved()
+                            showSaveSheet = false
+                            saveName = ""
+                        }
+                    }
+                }.disabled(saveName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .padding(.top, 4)
+        }
+        .padding()
+        .frame(minWidth: 320)
     }
 }
 

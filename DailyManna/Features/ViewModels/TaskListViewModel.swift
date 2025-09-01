@@ -103,11 +103,13 @@ final class TaskListViewModel: ObservableObject {
                     }
                 }
             }
-            // Apply OR filter by labels if any selected
+            // Apply label filter if any selected (supports AND/OR via matchAll)
             if activeFilterLabelIds.isEmpty == false {
                 pairs = pairs.filter { pair in
                     let ids = Set(pair.1.map { $0.id })
-                    return ids.intersection(activeFilterLabelIds).isEmpty == false
+                    return matchAll
+                        ? ids.isSuperset(of: activeFilterLabelIds) // AND
+                        : ids.intersection(activeFilterLabelIds).isEmpty == false // OR
                 }
             }
             // Apply label filtering if any active
@@ -120,6 +122,15 @@ final class TaskListViewModel: ObservableObject {
             Logger.shared.error("Failed to fetch tasks", category: .ui, error: error)
         }
         isLoading = false
+    }
+
+    func applyLabelFilter(selected: Set<UUID>, matchAll: Bool) {
+        self.activeFilterLabelIds = selected
+        self.matchAll = matchAll
+        persistFilterIds()
+        _Concurrency.Task {
+            await fetchTasks(in: isBoardModeActive ? nil : selectedBucket)
+        }
     }
 
     private func loadSubtaskProgressIncremental(for parentIds: [UUID]) async {

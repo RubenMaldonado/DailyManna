@@ -80,7 +80,7 @@ final class Dependencies {
         registerSingleton(type: TasksRepository.self) { dataContainer.tasksRepository }
         registerSingleton(type: LabelsRepository.self) { dataContainer.labelsRepository }
         registerSingleton(type: SyncStateStore.self) { dataContainer.syncStateStore }
-        registerSingleton(type: SavedFiltersRepository.self) { SwiftDataSavedFiltersRepository(modelContext: ModelContext(dataContainer.modelContainer)) }
+        registerSingleton(type: SavedFiltersRepository.self) { SupabaseSavedFiltersRepository() }
         
         // Remote Repositories
         registerSingleton(type: RemoteTasksRepository.self) { SupabaseTasksRepository() }

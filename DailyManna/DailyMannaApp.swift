@@ -45,7 +45,9 @@ struct DailyMannaApp: App {
             }
             .task {
                 await authService.runAuthLifecycle()
+                #if canImport(UIKit)
                 NotificationRouter.shared.register()
+                #endif
             }
         }
         .modelContainer(getModelContainer())

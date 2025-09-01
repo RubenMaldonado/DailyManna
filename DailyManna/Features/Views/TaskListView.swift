@@ -58,7 +58,7 @@ struct TaskListView: View {
                 .padding(.horizontal)
             }
             // New inline filter components
-            InlineFilterSection(userId: userId)
+            InlineFilterSection(userId: userId, viewModel: viewModel)
             QuickAddComposer(newTaskTitle: $newTaskTitle, onAdd: addCurrentTask)
             contentSection
             Spacer(minLength: 0)
@@ -526,15 +526,19 @@ private struct FilterBar: View {
 // MARK: - New Inline Filter Section (bar + drawer)
 private struct InlineFilterSection: View {
     let userId: UUID
+    @ObservedObject var viewModel: TaskListViewModel
     @StateObject private var vm: LabelsFilterViewModel
-    init(userId: UUID) {
+    init(userId: UUID, viewModel: TaskListViewModel) {
         self.userId = userId
+        self.viewModel = viewModel
         let deps = Dependencies.shared
         let useCases: LabelUseCases = try! deps.resolve(type: LabelUseCases.self)
         _vm = StateObject(wrappedValue: LabelsFilterViewModel(userId: userId, labelUseCases: useCases))
     }
     var body: some View {
-        FilterBarView(vm: vm)
+        FilterBarView(vm: vm) { ids, matchAll in
+            viewModel.applyLabelFilter(selected: ids, matchAll: matchAll)
+        }
     }
 }
 private struct FilterPickerSheet: View {

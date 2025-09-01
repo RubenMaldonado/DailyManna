@@ -50,6 +50,10 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 }
+#elseif canImport(AppKit)
+import AppKit
+// macOS notification handling could be implemented here if needed
+// For now, notifications work but don't route to specific tasks
 #endif
 
 
