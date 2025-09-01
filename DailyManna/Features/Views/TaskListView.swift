@@ -478,7 +478,6 @@ private struct FilterBar: View {
                 Button("Save Current…") { saveCurrent() }
             }
             .menuStyle(.borderlessButton)
-            Toggle(isOn: $viewModel.matchAll) { Text("All") }.toggleStyle(.switch).labelsHidden()
             if viewModel.activeFilterLabelIds.isEmpty == false {
                 Button("Clear") { viewModel.clearFilters() }.buttonStyle(SecondaryButtonStyle(size: .small))
             }
