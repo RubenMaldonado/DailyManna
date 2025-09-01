@@ -45,7 +45,7 @@ struct DailyMannaApp: App {
             }
             .task {
                 await authService.runAuthLifecycle()
-                #if canImport(UIKit)
+                 #if canImport(UIKit)
                 NotificationRouter.shared.register()
                 #endif
             }

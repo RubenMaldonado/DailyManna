@@ -27,6 +27,7 @@ final class TaskListViewModel: ObservableObject {
     // Filtering
     @Published var activeFilterLabelIds: Set<UUID> = []
     @Published var matchAll: Bool = false
+    @Published var unlabeledOnly: Bool = false
     
     private let taskUseCases: TaskUseCases
     private let labelUseCases: LabelUseCases
@@ -103,8 +104,10 @@ final class TaskListViewModel: ObservableObject {
                     }
                 }
             }
-            // Apply label filter if any selected (supports AND/OR via matchAll)
-            if activeFilterLabelIds.isEmpty == false {
+            // Apply unlabeled-only filter or label-based filter
+            if unlabeledOnly {
+                pairs = pairs.filter { $0.1.isEmpty }
+            } else if activeFilterLabelIds.isEmpty == false {
                 pairs = pairs.filter { pair in
                     let ids = Set(pair.1.map { $0.id })
                     return matchAll
@@ -127,7 +130,17 @@ final class TaskListViewModel: ObservableObject {
     func applyLabelFilter(selected: Set<UUID>, matchAll: Bool) {
         self.activeFilterLabelIds = selected
         self.matchAll = matchAll
+        self.unlabeledOnly = false
         persistFilterIds()
+        _Concurrency.Task {
+            await fetchTasks(in: isBoardModeActive ? nil : selectedBucket)
+        }
+    }
+
+    func applyUnlabeledFilter() {
+        self.activeFilterLabelIds.removeAll()
+        self.matchAll = false
+        self.unlabeledOnly = true
         _Concurrency.Task {
             await fetchTasks(in: isBoardModeActive ? nil : selectedBucket)
         }
@@ -155,6 +168,7 @@ final class TaskListViewModel: ObservableObject {
     func clearFilters() {
         activeFilterLabelIds.removeAll()
         matchAll = false
+        unlabeledOnly = false
         _Concurrency.Task { await fetchTasks(in: isBoardModeActive ? nil : selectedBucket) }
         persistFilterIds()
     }

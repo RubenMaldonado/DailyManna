@@ -37,6 +37,13 @@ struct FilterBarView: View {
                     .onSubmit { createOrToggle() }
                     .onChange(of: draftName) { _, _ in /* live suggestions shown below */ }
                 Menu("Saved") {
+                    // Built-in session-only saved filter
+                    Button("Unlabeled") {
+                        onSelectionChanged?([], false)
+                        // Signal unlabeled-only via a Notification to VM if provided elsewhere
+                        NotificationCenter.default.post(name: Notification.Name("dm.filter.unlabeled"), object: nil)
+                    }
+                    Divider()
                     if savedFilters.isEmpty { Text("No saved filters") }
                     ForEach(savedFilters) { filter in
                         Button(filter.name) {

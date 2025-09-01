@@ -78,6 +78,9 @@ struct TaskListView: View {
         .onAppear {
             _Concurrency.Task { await viewModel.fetchTasks(in: viewModel.selectedBucket) }
         }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("dm.filter.unlabeled"))) { _ in
+            viewModel.applyUnlabeledFilter()
+        }
         #if os(macOS)
         .onChange(of: viewMode) { _, mode in
             _Concurrency.Task {
