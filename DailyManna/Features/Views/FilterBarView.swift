@@ -10,6 +10,7 @@ import SwiftUI
 struct FilterBarView: View {
     @ObservedObject var vm: LabelsFilterViewModel
     var onSelectionChanged: ((Set<UUID>, Bool) -> Void)? = nil
+    var unlabeledActive: Bool = false
     @FocusState private var isAddFocused: Bool
     @State private var draftName: String = ""
     @State private var savedFilters: [SavedFilter] = []
@@ -38,10 +39,14 @@ struct FilterBarView: View {
                     .onChange(of: draftName) { _, _ in /* live suggestions shown below */ }
                 Menu("Saved") {
                     // Built-in session-only saved filter
-                    Button("Unlabeled") {
+                    Button(action: {
                         onSelectionChanged?([], false)
-                        // Signal unlabeled-only via a Notification to VM if provided elsewhere
                         NotificationCenter.default.post(name: Notification.Name("dm.filter.unlabeled"), object: nil)
+                    }) {
+                        HStack {
+                            Text("Unlabeled")
+                            if unlabeledActive { Spacer(); Image(systemName: "checkmark") }
+                        }
                     }
                     Divider()
                     if savedFilters.isEmpty { Text("No saved filters") }
