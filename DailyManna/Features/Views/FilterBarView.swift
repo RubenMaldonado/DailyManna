@@ -18,17 +18,32 @@ struct FilterBarView: View {
     @State private var savedFilters: [SavedFilter] = []
     @State private var showSaveSheet = false
     @State private var saveName: String = ""
+    @State private var activeSavedFilterId: UUID? = nil
+    @State private var activeSavedName: String? = nil
+    @State private var updatingFromSaved: Bool = false
     
     var body: some View {
         VStack(spacing: 8) {
             HStack(spacing: 8) {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
+                        if unlabeledActive {
+                            Pill(text: "Unlabeled") { clearAll() }
+                        }
+                        if let name = activeSavedName {
+                            Pill(text: "Saved: \(name)") { clearAll() }
+                        }
                         ForEach(vm.allLabels.filter { vm.selectedLabelIds.contains($0.id) }) { label in
                             HStack(spacing: 4) {
                                 LabelChip(label: label)
                                 Button { vm.toggle(label.id) } label: { Image(systemName: "xmark.circle.fill") }
                                     .buttonStyle(.plain)
+                            }
+                        }
+                        if vm.matchAll && vm.selectedLabelIds.isEmpty == false {
+                            Pill(text: "Match all") {
+                                vm.matchAll = false
+                                onSelectionChanged?(vm.selectedLabelIds, vm.matchAll)
                             }
                         }
                     }
@@ -39,10 +54,12 @@ struct FilterBarView: View {
                     .focused($isAddFocused)
                     .onSubmit { createOrToggle() }
                     .onChange(of: draftName) { _, _ in /* live suggestions shown below */ }
-                Menu("Saved") {
+                Menu(content: {
                     // Built-in session-only saved filter
                     Button(action: {
                         onSelectionChanged?([], false)
+                        activeSavedFilterId = nil
+                        activeSavedName = nil
                         onSelectUnlabeled?()
                     }) {
                         HStack {
@@ -53,26 +70,42 @@ struct FilterBarView: View {
                     Divider()
                     if savedFilters.isEmpty { Text("No saved filters") }
                     ForEach(savedFilters) { filter in
-                        Button(filter.name) {
-                            vm.selectedLabelIds = Set(filter.labelIds)
-                            vm.matchAll = filter.matchAll
+                        Button(action: {
+                            if activeSavedFilterId == filter.id {
+                                clearAll()
+                            } else {
+                                updatingFromSaved = true
+                                vm.selectedLabelIds = Set(filter.labelIds)
+                                vm.matchAll = filter.matchAll
+                                onSelectionChanged?(vm.selectedLabelIds, vm.matchAll)
+                                activeSavedFilterId = filter.id
+                                activeSavedName = filter.name
+                                updatingFromSaved = false
+                            }
+                        }) {
+                            HStack {
+                                Text(filter.name)
+                                if activeSavedFilterId == filter.id { Spacer(); Image(systemName: "checkmark") }
+                            }
                         }
                     }
                     Divider()
                     Button("Save Current…") { showSaveSheet = true }
-                }
+                }, label: {
+                    Text(activeSavedName ?? "Saved")
+                })
                 .menuStyle(.borderlessButton)
-
+                
                 Menu("Options") {
                     Toggle(isOn: $vm.matchAll) { Text("Match all") }
                     if vm.selectedLabelIds.isEmpty == false {
                         Divider()
-                        Button("Clear") { onClearAll?() ?? vm.clear() }
+                        Button("Clear") { clearAll() }
                     }
                 }
                 .menuStyle(.borderlessButton)
-                if unlabeledActive || vm.selectedLabelIds.isEmpty == false {
-                    Button("Clear filters") { onClearAll?() ?? vm.clear() }
+                if unlabeledActive || activeSavedFilterId != nil || vm.selectedLabelIds.isEmpty == false {
+                    Button("Clear filters") { clearAll() }
                         .buttonStyle(SecondaryButtonStyle(size: .small))
                 }
             }
@@ -92,8 +125,14 @@ struct FilterBarView: View {
         .surfaceStyle(.chrome)
         .padding(.vertical, 4)
         .task { await vm.load(); await loadSaved() }
-        .onChange(of: vm.selectedLabelIds) { _, ids in onSelectionChanged?(ids, vm.matchAll) }
-        .onChange(of: vm.matchAll) { _, _ in onSelectionChanged?(vm.selectedLabelIds, vm.matchAll) }
+        .onChange(of: vm.selectedLabelIds) { _, ids in
+            if updatingFromSaved == false { activeSavedFilterId = nil; activeSavedName = nil }
+            onSelectionChanged?(ids, vm.matchAll)
+        }
+        .onChange(of: vm.matchAll) { _, _ in
+            if updatingFromSaved == false { activeSavedFilterId = nil; activeSavedName = nil }
+            onSelectionChanged?(vm.selectedLabelIds, vm.matchAll)
+        }
         .sheet(isPresented: $showSaveSheet) { saveSheet }
     }
     
@@ -108,7 +147,15 @@ struct FilterBarView: View {
         draftName = ""
         isAddFocused = true
     }
+    
+    private func clearAll() {
+        activeSavedFilterId = nil
+        activeSavedName = nil
+        vm.clear()
+        onClearAll?()
+    }
 }
+
 private extension FilterBarView {
     func loadSaved() async {
         let deps = Dependencies.shared
@@ -116,7 +163,7 @@ private extension FilterBarView {
             savedFilters = (try? await repo.list(for: vm.userId)) ?? []
         }
     }
-
+    
     var saveSheet: some View {
         VStack(spacing: 12) {
             Text("Save Filter").font(.headline)
