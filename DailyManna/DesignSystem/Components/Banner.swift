@@ -1,4 +1,32 @@
 //
+//  Pill.swift
+//  DailyManna
+//
+//  Small capsule pill for inline filter indicators.
+//
+
+import SwiftUI
+
+struct Pill: View {
+    let text: String
+    var onClear: (() -> Void)? = nil
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(text).style(Typography.caption).foregroundColor(Colors.onSurface)
+            if let onClear = onClear {
+                Button(action: onClear) { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.plain)
+                    .foregroundColor(Colors.onSurfaceVariant)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Colors.surface)
+        .cornerRadius(999)
+    }
+}
+
+//
 //  Banner.swift
 //  DailyManna
 //

@@ -539,9 +539,19 @@ private struct InlineFilterSection: View {
         _vm = StateObject(wrappedValue: LabelsFilterViewModel(userId: userId, labelUseCases: useCases))
     }
     var body: some View {
-        FilterBarView(vm: vm, onSelectionChanged: { ids, matchAll in
-            viewModel.applyLabelFilter(selected: ids, matchAll: matchAll)
-        }, unlabeledActive: viewModel.unlabeledOnly)
+        FilterBarView(
+            vm: vm,
+            onSelectionChanged: { ids, matchAll in
+                viewModel.applyLabelFilter(selected: ids, matchAll: matchAll)
+            },
+            onSelectUnlabeled: {
+                viewModel.applyUnlabeledFilter()
+            },
+            onClearAll: {
+                viewModel.clearFilters()
+            },
+            unlabeledActive: viewModel.unlabeledOnly
+        )
     }
 }
 private struct FilterPickerSheet: View {

@@ -10,6 +10,8 @@ import SwiftUI
 struct FilterBarView: View {
     @ObservedObject var vm: LabelsFilterViewModel
     var onSelectionChanged: ((Set<UUID>, Bool) -> Void)? = nil
+    var onSelectUnlabeled: (() -> Void)? = nil
+    var onClearAll: (() -> Void)? = nil
     var unlabeledActive: Bool = false
     @FocusState private var isAddFocused: Bool
     @State private var draftName: String = ""
@@ -41,7 +43,7 @@ struct FilterBarView: View {
                     // Built-in session-only saved filter
                     Button(action: {
                         onSelectionChanged?([], false)
-                        NotificationCenter.default.post(name: Notification.Name("dm.filter.unlabeled"), object: nil)
+                        onSelectUnlabeled?()
                     }) {
                         HStack {
                             Text("Unlabeled")
@@ -65,10 +67,14 @@ struct FilterBarView: View {
                     Toggle(isOn: $vm.matchAll) { Text("Match all") }
                     if vm.selectedLabelIds.isEmpty == false {
                         Divider()
-                        Button("Clear") { vm.clear() }
+                        Button("Clear") { onClearAll?() ?? vm.clear() }
                     }
                 }
                 .menuStyle(.borderlessButton)
+                if unlabeledActive || vm.selectedLabelIds.isEmpty == false {
+                    Button("Clear filters") { onClearAll?() ?? vm.clear() }
+                        .buttonStyle(SecondaryButtonStyle(size: .small))
+                }
             }
             // Suggestions dropdown (inline, non-blocking)
             if draftName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
