@@ -98,6 +98,7 @@ struct FilterBarView: View {
                 
                 Menu("Options") {
                     Toggle(isOn: $vm.matchAll) { Text("Match all") }
+                    Toggle(isOn: Binding(get: { UserDefaults.standard.bool(forKey: "sortByDueDate") }, set: { UserDefaults.standard.set($0, forKey: "sortByDueDate"); onSelectionChanged?(vm.selectedLabelIds, vm.matchAll) })) { Text("Sort by Due Date") }
                     if vm.selectedLabelIds.isEmpty == false {
                         Divider()
                         Button("Clear") { clearAll() }

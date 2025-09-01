@@ -47,16 +47,6 @@ struct TaskListView: View {
             BucketHeader(bucket: viewModel.selectedBucket,
                          count: viewModel.bucketCounts[viewModel.selectedBucket] ?? 0)
             .padding(.horizontal)
-            // Sorting toggle
-            HStack {
-                Spacer()
-                Toggle(isOn: Binding(get: { UserDefaults.standard.bool(forKey: "sortByDueDate") }, set: { UserDefaults.standard.set($0, forKey: "sortByDueDate"); _Concurrency.Task { await viewModel.fetchTasks(in: viewModel.selectedBucket) } })) {
-                    Text("Sort by Due Date")
-                }
-                .toggleStyle(.switch)
-                .labelsHidden()
-                .padding(.horizontal)
-            }
             // New inline filter components
             InlineFilterSection(userId: userId, viewModel: viewModel)
             QuickAddComposer(newTaskTitle: $newTaskTitle, onAdd: addCurrentTask)
