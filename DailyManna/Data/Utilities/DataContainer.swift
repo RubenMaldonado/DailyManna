@@ -37,7 +37,9 @@ final class DataContainer {
             TaskLabelEntity.self,
             TimeBucketEntity.self,
             SyncStateEntity.self,
-            SavedFilterEntity.self
+            SavedFilterEntity.self,
+            RecurrenceEntity.self,
+            RecurrenceInstanceEntity.self
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         
@@ -102,7 +104,9 @@ final class DataContainer {
             LabelEntity.self,
             TaskLabelEntity.self,
             SyncStateEntity.self,
-            SavedFilterEntity.self
+            SavedFilterEntity.self,
+            RecurrenceEntity.self,
+            RecurrenceInstanceEntity.self
         ])
         
         let modelConfiguration = ModelConfiguration(

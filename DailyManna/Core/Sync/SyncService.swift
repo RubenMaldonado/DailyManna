@@ -223,6 +223,19 @@ final class SyncService: ObservableObject {
             }
         }
     }
+
+    // MARK: - Recurrences (pull-only v1; app creates/updates eagerly)
+    private func syncRecurrences(userId: UUID) async throws {
+        // Pull-only for v1: refresh recurrence flags by reading server rows
+        // This assumes RecurrenceUseCases local repo is always updated when user edits locally.
+        do {
+            let deps = Dependencies.shared
+            let recUC = try deps.resolve(type: RecurrenceUseCases.self)
+            _ = try await recUC.list(for: userId) // trigger local cache refresh if remote repo used elsewhere
+        } catch {
+            Logger.shared.error("Failed to sync recurrences", category: .sync, error: error)
+        }
+    }
     
     /// Performs initial sync for a user
     func performInitialSync(for userId: UUID) async {
