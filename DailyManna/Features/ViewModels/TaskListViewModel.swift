@@ -304,6 +304,9 @@ final class TaskListViewModel: ObservableObject {
             guard let next = recUC.nextOccurrence(from: anchorDate, rule: rec.rule) else { return }
             var newTask = Task(userId: template.userId, bucketKey: template.bucketKey, title: template.title, description: template.description, dueAt: next)
             try await taskUseCases.createTask(newTask)
+            if let due = newTask.dueAt {
+                await NotificationsManager.scheduleDueNotification(taskId: newTask.id, title: newTask.title, dueAt: due, bucketKey: newTask.bucketKey.rawValue)
+            }
             // copy labels
             let ids = Set(labels.map { $0.id })
             try await taskUseCases.setLabels(for: newTask.id, to: ids, userId: userId)
