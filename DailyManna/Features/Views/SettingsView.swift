@@ -20,7 +20,7 @@ final class SettingsViewModel: ObservableObject {
     private let remoteLabelsRepository: RemoteLabelsRepository
     private let syncService: SyncService
     private let recurrenceUseCases: RecurrenceUseCases = try! Dependencies.shared.resolve(type: RecurrenceUseCases.self)
-    private let recurrenceUseCases: RecurrenceUseCases = try! Dependencies.shared.resolve(type: RecurrenceUseCases.self)
+    
     let userId: UUID
     
     init(tasksRepository: TasksRepository,
