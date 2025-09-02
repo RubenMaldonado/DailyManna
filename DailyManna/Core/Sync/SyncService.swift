@@ -63,6 +63,16 @@ final class SyncService: ObservableObject {
                 guard let self else { return }
                 try await self.syncLabels(userId: userId)
             }
+
+            // Recurrences (pull + catch-up)
+            try await withRetry { [weak self] in
+                guard let self else { return }
+                try await self.syncRecurrences(userId: userId)
+            }
+            try await withRetry { [weak self] in
+                guard let self else { return }
+                await self.catchUpRecurrencesIfNeeded(userId: userId)
+            }
             
             lastSyncDate = Date()
             Logger.shared.info("Sync completed successfully", category: .sync)
@@ -234,6 +244,35 @@ final class SyncService: ObservableObject {
             _ = try await recUC.list(for: userId) // trigger local cache refresh if remote repo used elsewhere
         } catch {
             Logger.shared.error("Failed to sync recurrences", category: .sync, error: error)
+        }
+    }
+
+    /// Generate missed instances if next_scheduled_at is in the past (single step catch-up per recurrence)
+    private func catchUpRecurrencesIfNeeded(userId: UUID) async {
+        do {
+            let deps = Dependencies.shared
+            let recUC = try deps.resolve(type: RecurrenceUseCases.self)
+            let taskUC = try TaskUseCases(
+                tasksRepository: deps.resolve(type: TasksRepository.self),
+                labelsRepository: deps.resolve(type: LabelsRepository.self)
+            )
+            let recurrences = try await recUC.list(for: userId)
+            for rec in recurrences where rec.status == "active" {
+                guard let next = rec.nextScheduledAt, next <= Date() else { continue }
+                // Load template task and labels
+                if let (template, labels) = try await taskUC.fetchTaskWithLabels(by: rec.taskTemplateId) {
+                    var newTask = Task(userId: template.userId, bucketKey: template.bucketKey, title: template.title, description: template.description, dueAt: next)
+                    try await taskUC.createTask(newTask)
+                    let labelIds = Set(labels.map { $0.id })
+                    try await taskUC.setLabels(for: newTask.id, to: labelIds, userId: userId)
+                    if let due = newTask.dueAt {
+                        await NotificationsManager.scheduleDueNotification(taskId: newTask.id, title: newTask.title, dueAt: due, bucketKey: newTask.bucketKey.rawValue)
+                    }
+                    Logger.shared.info("Catch-up: generated instance for recurrence template=\(rec.taskTemplateId) at=\(next)", category: .sync)
+                }
+            }
+        } catch {
+            Logger.shared.error("Recurrence catch-up failed", category: .sync, error: error)
         }
     }
     
