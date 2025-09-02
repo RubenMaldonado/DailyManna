@@ -295,22 +295,39 @@ final class TaskListViewModel: ObservableObject {
     private func generateNextInstanceIfRecurring(templateTaskId: UUID, anchor: Date? = nil) async {
         guard let recUC = recurrenceUseCases else { return }
         do {
-            guard let rec = try await recUC.getByTaskTemplateId(templateTaskId, userId: userId) else { return }
             let deps = Dependencies.shared
+            let taskUseCases = try TaskUseCases(
+                tasksRepository: deps.resolve(type: TasksRepository.self),
+                labelsRepository: deps.resolve(type: LabelsRepository.self)
+            )
+
+            // Resolve the true template ID: if no recurrence exists for the given id,
+            // check whether this task is a generated instance with a parent template.
+            let effectiveTemplateId: UUID = {
+                if let _ = try? await recUC.getByTaskTemplateId(templateTaskId, userId: userId) {
+                    return templateTaskId
+                }
+                if let (candidate, _) = try? await taskUseCases.fetchTaskWithLabels(by: templateTaskId), let parent = candidate.parentTaskId,
+                   let _ = try? await recUC.getByTaskTemplateId(parent, userId: userId) {
+                    return parent
+                }
+                return templateTaskId
+            }()
+
+            guard let rec = try await recUC.getByTaskTemplateId(effectiveTemplateId, userId: userId) else { return }
+
             // Load template task with labels
-            guard let (template, labels) = try await TaskUseCases(
-                tasksRepository: try deps.resolve(type: TasksRepository.self),
-                labelsRepository: try deps.resolve(type: LabelsRepository.self)
-            ).fetchTaskWithLabels(by: templateTaskId) else { return }
+            guard let (template, labels) = try await taskUseCases.fetchTaskWithLabels(by: effectiveTemplateId) else { return }
             let anchorDate = anchor ?? template.dueAt ?? Date()
             guard let next = recUC.nextOccurrence(from: anchorDate, rule: rec.rule) else { return }
-            Logger.shared.info("Generate next instance for template=\(templateTaskId) at=\(next)", category: .ui)
-            var newTask = Task(userId: template.userId, bucketKey: template.bucketKey, title: template.title, description: template.description, dueAt: next)
+            Logger.shared.info("Generate next instance for template=\(effectiveTemplateId) at=\(next)", category: .ui)
+            // Important: link new instance to template via parentTaskId
+            var newTask = Task(userId: template.userId, bucketKey: template.bucketKey, parentTaskId: effectiveTemplateId, title: template.title, description: template.description, dueAt: next)
             try await taskUseCases.createTask(newTask)
             if let due = newTask.dueAt {
                 await NotificationsManager.scheduleDueNotification(taskId: newTask.id, title: newTask.title, dueAt: due, bucketKey: newTask.bucketKey.rawValue)
             }
-            // copy labels
+            // copy labels from template
             let ids = Set(labels.map { $0.id })
             try await taskUseCases.setLabels(for: newTask.id, to: ids, userId: userId)
             await refreshCounts()
