@@ -298,10 +298,10 @@ final class TaskListViewModel: ObservableObject {
             guard let rec = try await recUC.getByTaskTemplateId(templateTaskId, userId: userId) else { return }
             let deps = Dependencies.shared
             // Load template task with labels
-            let (template, labels) = try await TaskUseCases(
+            guard let (template, labels) = try await TaskUseCases(
                 tasksRepository: try deps.resolve(type: TasksRepository.self),
                 labelsRepository: try deps.resolve(type: LabelsRepository.self)
-            ).fetchTaskWithLabels(by: templateTaskId) ?? { return }()
+            ).fetchTaskWithLabels(by: templateTaskId) else { return }
             let anchorDate = anchor ?? template.dueAt ?? Date()
             guard let next = recUC.nextOccurrence(from: anchorDate, rule: rec.rule) else { return }
             Logger.shared.info("Generate next instance for template=\(templateTaskId) at=\(next)", category: .ui)
