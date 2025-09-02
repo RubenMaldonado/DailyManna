@@ -1,6 +1,6 @@
 import Foundation
 
-public struct RecurrenceRule: Codable, Equatable {
+public struct RecurrenceRule: Codable, Equatable, Hashable {
     public enum Frequency: String, Codable { case daily = "DAILY", weekly = "WEEKLY", monthly = "MONTHLY", yearly = "YEARLY" }
     public var freq: Frequency
     public var interval: Int
