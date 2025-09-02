@@ -338,11 +338,11 @@ This document outlines a prioritized, iterative development approach for Daily M
 - As a user, I can manage my routine tasks effectively
 
 **Acceptance Criteria**:
-- [ ] Implement recurrence rule parsing and storage
-- [ ] Create next-instance generation logic
-- [ ] Build recurring task UI with pattern selection
-- [ ] Add routine-specific views and management
-- [ ] Implement recurrence conflict handling in sync
+- [x] Implement recurrence rule parsing and storage (Swift + Supabase JSON rules)
+- [x] Create next-instance generation logic (complete-to-generate-next + catch-up)
+- [x] Build recurring task UI with pattern selection (Daily, Weekdays, Weekly, Monthly-day)
+- [x] Add routine-specific actions (Pause/Resume, Skip next, Generate now)
+- [x] Implement recurrence sync and idempotency (pull + catch-up; local-first create/update)
 
 ### Epic 3.2: Widgets & App Intents
 **Priority**: Medium
