@@ -267,6 +267,7 @@ final class TaskListViewModel: ObservableObject {
         do {
             if var rec = try await recUC.getByTaskTemplateId(taskId, userId: userId) {
                 rec.status = (rec.status == "active") ? "paused" : "active"
+                Logger.shared.info("Toggle recurrence status for template=\(taskId) -> \(rec.status)", category: .ui)
                 try await recUC.update(rec)
                 await fetchTasks(in: isBoardModeActive ? nil : selectedBucket)
             }
@@ -282,6 +283,7 @@ final class TaskListViewModel: ObservableObject {
                 let anchor = rec.nextScheduledAt ?? Date()
                 if let next = recUC.nextOccurrence(from: anchor, rule: rec.rule) {
                     rec.nextScheduledAt = next
+                    Logger.shared.info("Skip next for template=\(taskId) new next=\(next)", category: .ui)
                     try await recUC.update(rec)
                 }
             }
@@ -302,6 +304,7 @@ final class TaskListViewModel: ObservableObject {
             ).fetchTaskWithLabels(by: templateTaskId) ?? { return }()
             let anchorDate = anchor ?? template.dueAt ?? Date()
             guard let next = recUC.nextOccurrence(from: anchorDate, rule: rec.rule) else { return }
+            Logger.shared.info("Generate next instance for template=\(templateTaskId) at=\(next)", category: .ui)
             var newTask = Task(userId: template.userId, bucketKey: template.bucketKey, title: template.title, description: template.description, dueAt: next)
             try await taskUseCases.createTask(newTask)
             if let due = newTask.dueAt {
