@@ -80,11 +80,14 @@ final class Dependencies {
         registerSingleton(type: TasksRepository.self) { dataContainer.tasksRepository }
         registerSingleton(type: LabelsRepository.self) { dataContainer.labelsRepository }
         registerSingleton(type: SyncStateStore.self) { dataContainer.syncStateStore }
+        // Recurrences
+        registerSingleton(type: RecurrencesRepository.self) { SwiftDataRecurrencesRepository(modelContext: ModelContext(dataContainer.modelContainer)) }
         registerSingleton(type: SavedFiltersRepository.self) { SupabaseSavedFiltersRepository() }
         
         // Remote Repositories
         registerSingleton(type: RemoteTasksRepository.self) { SupabaseTasksRepository() }
         registerSingleton(type: RemoteLabelsRepository.self) { SupabaseLabelsRepository() }
+        registerSingleton(type: SupabaseRecurrencesRepository.self) { SupabaseRecurrencesRepository() }
         
         // Sync Service
         registerSingleton(type: SyncService.self) {
@@ -107,6 +110,12 @@ final class Dependencies {
         registerSingleton(type: LabelUseCases.self) {
             try! LabelUseCases(
                 labelsRepository: self.resolve(type: LabelsRepository.self)
+            )
+        }
+        registerSingleton(type: RecurrenceUseCases.self) {
+            RecurrenceUseCases(
+                local: try! self.resolve(type: RecurrencesRepository.self),
+                remote: try! self.resolve(type: SupabaseRecurrencesRepository.self)
             )
         }
         
