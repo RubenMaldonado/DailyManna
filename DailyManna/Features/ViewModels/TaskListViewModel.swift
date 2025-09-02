@@ -303,16 +303,15 @@ final class TaskListViewModel: ObservableObject {
 
             // Resolve the true template ID: if no recurrence exists for the given id,
             // check whether this task is a generated instance with a parent template.
-            let effectiveTemplateId: UUID = {
-                if let _ = try? await recUC.getByTaskTemplateId(templateTaskId, userId: userId) {
-                    return templateTaskId
-                }
-                if let (candidate, _) = try? await taskUseCases.fetchTaskWithLabels(by: templateTaskId), let parent = candidate.parentTaskId,
-                   let _ = try? await recUC.getByTaskTemplateId(parent, userId: userId) {
-                    return parent
-                }
-                return templateTaskId
-            }()
+            let effectiveTemplateId: UUID
+            if let _ = try? await recUC.getByTaskTemplateId(templateTaskId, userId: userId) {
+                effectiveTemplateId = templateTaskId
+            } else if let (candidate, _) = try? await taskUseCases.fetchTaskWithLabels(by: templateTaskId), let parent = candidate.parentTaskId,
+                      let _ = try? await recUC.getByTaskTemplateId(parent, userId: userId) {
+                effectiveTemplateId = parent
+            } else {
+                effectiveTemplateId = templateTaskId
+            }
 
             guard let rec = try await recUC.getByTaskTemplateId(effectiveTemplateId, userId: userId) else { return }
 
