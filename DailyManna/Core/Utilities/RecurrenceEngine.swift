@@ -22,8 +22,8 @@ struct RecurrenceEngine {
 
     private func applyTime(_ date: Date?, _ time: String?, _ cal: Calendar) -> Date? {
         guard let date else { return nil }
-        guard let time else { return date }
-        let parts = time.split(separator: ":")
+        let t = time ?? "08:00" // default 8:00 AM when no time specified
+        let parts = t.split(separator: ":")
         guard parts.count == 2, let h = Int(parts[0]), let m = Int(parts[1]) else { return date }
         var comps = cal.dateComponents([.year,.month,.day], from: date)
         comps.hour = h; comps.minute = m

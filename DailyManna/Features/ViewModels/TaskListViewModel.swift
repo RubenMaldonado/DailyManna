@@ -317,12 +317,18 @@ final class TaskListViewModel: ObservableObject {
 
             // Load template task with labels
             guard let (template, labels) = try await taskUseCases.fetchTaskWithLabels(by: effectiveTemplateId) else { return }
-            let anchorDate = anchor ?? template.dueAt ?? Date()
+            // Use completion time if provided; otherwise fall back to template's dueAt or now
+            let anchorDate = anchor ?? Date()
             guard let next = recUC.nextOccurrence(from: anchorDate, rule: rec.rule) else { return }
             Logger.shared.info("Generate next instance for template=\(effectiveTemplateId) at=\(next)", category: .ui)
             // Important: link new instance to template via parentTaskId
             var newTask = Task(userId: template.userId, bucketKey: template.bucketKey, parentTaskId: effectiveTemplateId, title: template.title, description: template.description, dueAt: next)
             try await taskUseCases.createTask(newTask)
+            // Persist next scheduled on recurrence to avoid duplicate generation bursts
+            var updatedRec = rec
+            updatedRec.lastGeneratedAt = Date()
+            updatedRec.nextScheduledAt = next
+            try? await recUC.update(updatedRec)
             if let due = newTask.dueAt {
                 await NotificationsManager.scheduleDueNotification(taskId: newTask.id, title: newTask.title, dueAt: due, bucketKey: newTask.bucketKey.rawValue)
             }
