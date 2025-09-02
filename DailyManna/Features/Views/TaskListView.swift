@@ -181,6 +181,7 @@ private struct InlineBoardView: View {
                         bucket: bucket,
                         tasksWithLabels: viewModel.tasksWithLabels.filter { $0.0.bucketKey == bucket },
                         subtaskProgressByParent: viewModel.subtaskProgressByParent,
+                        tasksWithRecurrence: viewModel.tasksWithRecurrence,
                         onDropTask: { taskId, targetIndex in
                             _Concurrency.Task {
                                 await viewModel.reorder(taskId: taskId, to: bucket, targetIndex: targetIndex)
@@ -189,7 +190,10 @@ private struct InlineBoardView: View {
                         onToggle: { task in _Concurrency.Task { await viewModel.toggleTaskCompletion(task: task, refreshIn: nil) } },
                         onMove: { taskId, dest in _Concurrency.Task { await viewModel.move(taskId: taskId, to: dest, refreshIn: nil) } },
                         onEdit: { task in viewModel.presentEditForm(task: task) },
-                        onDelete: { task in viewModel.confirmDelete(task) }
+                        onDelete: { task in viewModel.confirmDelete(task) },
+                        onPauseResume: { id in _Concurrency.Task { await viewModel.pauseResume(taskId: id) } },
+                        onSkipNext: { id in _Concurrency.Task { await viewModel.skipNext(taskId: id) } },
+                        onGenerateNow: { id in _Concurrency.Task { await viewModel.generateNow(taskId: id) } }
                     )
                 }
             }
@@ -204,11 +208,15 @@ private struct InlineBucketColumn: View {
     let bucket: TimeBucket
     let tasksWithLabels: [(Task, [Label])]
     let subtaskProgressByParent: [UUID: (completed: Int, total: Int)]
+    let tasksWithRecurrence: Set<UUID>
     let onDropTask: (UUID, Int) -> Void
     let onToggle: (Task) -> Void
     let onMove: (UUID, TimeBucket) -> Void
     let onEdit: (Task) -> Void
     let onDelete: (Task) -> Void
+    let onPauseResume: (UUID) -> Void
+    let onSkipNext: (UUID) -> Void
+    let onGenerateNow: (UUID) -> Void
     @State private var rowFrames: [UUID: CGRect] = [:]
     // drag indicator state
     @State private var isDragActive: Bool = false
@@ -231,10 +239,10 @@ private struct InlineBucketColumn: View {
                             labels: pair.1,
                             onToggleCompletion: { onToggle(pair.0) },
                             subtaskProgress: subtaskProgressByParent[pair.0.id],
-                            showsRecursIcon: viewModel.tasksWithRecurrence.contains(pair.0.id),
-                            onPauseResume: { _Concurrency.Task { await viewModel.pauseResume(taskId: pair.0.id) } },
-                            onSkipNext: { _Concurrency.Task { await viewModel.skipNext(taskId: pair.0.id) } },
-                            onGenerateNow: { _Concurrency.Task { await viewModel.generateNow(taskId: pair.0.id) } }
+                            showsRecursIcon: tasksWithRecurrence.contains(pair.0.id),
+                            onPauseResume: { onPauseResume(pair.0.id) },
+                            onSkipNext: { onSkipNext(pair.0.id) },
+                            onGenerateNow: { onGenerateNow(pair.0.id) }
                         )
                             .contextMenu {
                                 Menu("Move to") {
@@ -767,6 +775,7 @@ private struct TaskRowView: View {
     let onEdit: (Task) -> Void
     let onMove: (UUID, TimeBucket) -> Void
     let onDelete: (Task) -> Void
+    @EnvironmentObject private var viewModel: TaskListViewModel
     
     var body: some View {
         TaskCard(task: task, labels: labels, onToggleCompletion: { onToggle(task) }, subtaskProgress: subtaskProgress, showsRecursIcon: viewModel.tasksWithRecurrence.contains(task.id), onPauseResume: { _Concurrency.Task { await viewModel.pauseResume(taskId: task.id) } }, onSkipNext: { _Concurrency.Task { await viewModel.skipNext(taskId: task.id) } }, onGenerateNow: { _Concurrency.Task { await viewModel.generateNow(taskId: task.id) } })
