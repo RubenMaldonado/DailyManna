@@ -11,15 +11,21 @@ struct TaskCard: View {
     let task: Task
     let labels: [Label]
     var onToggleCompletion: (() -> Void)?
+    var onPauseResume: (() -> Void)? = nil
+    var onSkipNext: (() -> Void)? = nil
+    var onGenerateNow: (() -> Void)? = nil
     var showsRecursIcon: Bool = false
     var subtaskProgress: (completed: Int, total: Int)? = nil
     
-    init(task: Task, labels: [Label], onToggleCompletion: (() -> Void)? = nil, subtaskProgress: (completed: Int, total: Int)? = nil, showsRecursIcon: Bool = false) {
+    init(task: Task, labels: [Label], onToggleCompletion: (() -> Void)? = nil, subtaskProgress: (completed: Int, total: Int)? = nil, showsRecursIcon: Bool = false, onPauseResume: (() -> Void)? = nil, onSkipNext: (() -> Void)? = nil, onGenerateNow: (() -> Void)? = nil) {
         self.task = task
         self.labels = labels
         self.onToggleCompletion = onToggleCompletion
         self.subtaskProgress = subtaskProgress
         self.showsRecursIcon = showsRecursIcon
+        self.onPauseResume = onPauseResume
+        self.onSkipNext = onSkipNext
+        self.onGenerateNow = onGenerateNow
     }
     
     var body: some View {
@@ -87,6 +93,13 @@ struct TaskCard: View {
         .cardPadding()
         .surfaceStyle(.content)
         .cornerRadius(Spacing.small)
+        .contextMenu {
+            if showsRecursIcon {
+                Button("Pause/Resume") { onPauseResume?() }
+                Button("Skip next") { onSkipNext?() }
+                Button("Generate now") { onGenerateNow?() }
+            }
+        }
     }
 }
 

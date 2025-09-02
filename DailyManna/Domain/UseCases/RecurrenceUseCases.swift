@@ -11,6 +11,7 @@ public final class RecurrenceUseCases {
     }
 
     public func list(for userId: UUID) async throws -> [Recurrence] { try await local.list(for: userId) }
+    public func getByTaskTemplateId(_ taskId: UUID, userId: UUID) async throws -> Recurrence? { try await local.getByTaskTemplateId(taskId, userId: userId) }
 
     public func create(_ recurrence: Recurrence) async throws {
         try await local.create(recurrence)

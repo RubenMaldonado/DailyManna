@@ -231,7 +231,10 @@ private struct InlineBucketColumn: View {
                             labels: pair.1,
                             onToggleCompletion: { onToggle(pair.0) },
                             subtaskProgress: subtaskProgressByParent[pair.0.id],
-                            showsRecursIcon: viewModel.tasksWithRecurrence.contains(pair.0.id)
+                            showsRecursIcon: viewModel.tasksWithRecurrence.contains(pair.0.id),
+                            onPauseResume: { /* wire later */ },
+                            onSkipNext: { /* wire later */ },
+                            onGenerateNow: { /* wire later */ }
                         )
                             .contextMenu {
                                 Menu("Move to") {
@@ -766,7 +769,7 @@ private struct TaskRowView: View {
     let onDelete: (Task) -> Void
     
     var body: some View {
-        TaskCard(task: task, labels: labels, onToggleCompletion: { onToggle(task) }, subtaskProgress: subtaskProgress, showsRecursIcon: viewModel.tasksWithRecurrence.contains(task.id))
+        TaskCard(task: task, labels: labels, onToggleCompletion: { onToggle(task) }, subtaskProgress: subtaskProgress, showsRecursIcon: viewModel.tasksWithRecurrence.contains(task.id), onPauseResume: { /* wire later */ }, onSkipNext: { /* wire later */ }, onGenerateNow: { /* wire later */ })
             .contextMenu {
                 Button("Edit") { onEdit(task) }
                 Menu("Move to") {
