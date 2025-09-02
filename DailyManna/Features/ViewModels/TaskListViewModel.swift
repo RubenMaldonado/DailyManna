@@ -357,14 +357,15 @@ final class TaskListViewModel: ObservableObject {
                 if let due = newTask.dueAt {
                     await NotificationsManager.scheduleDueNotification(taskId: newTask.id, title: newTask.title, dueAt: due, bucketKey: newTask.bucketKey.rawValue)
                 }
-                if let desired = pendingLabelSelections[newTask.id] {
+                // For new tasks, selections were posted keyed by draft.id before creation.
+                if let desired = pendingLabelSelections[draft.id] {
                     try await taskUseCases.setLabels(for: newTask.id, to: desired, userId: userId)
-                    pendingLabelSelections.removeValue(forKey: newTask.id)
+                    pendingLabelSelections.removeValue(forKey: draft.id)
                 }
-                if let rule = pendingRecurrenceSelections[newTask.id], let recUC = recurrenceUseCases {
+                if let rule = pendingRecurrenceSelections[draft.id], let recUC = recurrenceUseCases {
                     let recurrence = Recurrence(userId: userId, taskTemplateId: newTask.id, rule: rule)
                     try? await recUC.create(recurrence)
-                    pendingRecurrenceSelections.removeValue(forKey: newTask.id)
+                    pendingRecurrenceSelections.removeValue(forKey: draft.id)
                 }
             }
             await refreshCounts()
