@@ -83,11 +83,13 @@ struct DailyMannaApp: App {
             let taskUseCases = try Dependencies.shared.resolve(type: TaskUseCases.self)
             let labelUseCases = try Dependencies.shared.resolve(type: LabelUseCases.self)
             let syncService = try Dependencies.shared.resolve(type: SyncService.self)
+            let recurrenceUseCases = try Dependencies.shared.resolve(type: RecurrenceUseCases.self)
             let viewModel = TaskListViewModel(
                 taskUseCases: taskUseCases,
                 labelUseCases: labelUseCases,
                 userId: user.id,
-                syncService: syncService
+                syncService: syncService,
+                recurrenceUseCases: recurrenceUseCases
             )
             return AnyView(TaskListView(viewModel: viewModel, userId: user.id))
         } catch {

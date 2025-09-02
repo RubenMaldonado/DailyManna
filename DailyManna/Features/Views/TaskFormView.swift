@@ -21,6 +21,7 @@ struct TaskFormView: View {
     @State private var subtasks: [Task] = []
     @State private var newSubtaskTitle: String = ""
     @State private var isEditingSubtasks: Bool = false
+    @State private var recurrenceRule: RecurrenceRule? = nil
     
     var body: some View {
         NavigationStack {
@@ -42,6 +43,7 @@ struct TaskFormView: View {
                             Text(bucket.displayName).tag(bucket)
                         }
                     }
+                    RecurrencePicker(rule: $recurrenceRule)
                 }
                 // Subtasks
                 if isEditing {
@@ -101,6 +103,12 @@ struct TaskFormView: View {
                             "taskId": draft.id,
                             "labelIds": Array(selectedLabels)
                         ])
+                        if let rule = recurrenceRule, let data = try? JSONEncoder().encode(rule) {
+                            NotificationCenter.default.post(name: Notification.Name("dm.taskform.recurrence.selection"), object: nil, userInfo: [
+                                "taskId": draft.id,
+                                "ruleJSON": data
+                            ])
+                        }
                         onSave(draft)
                         dismiss()
                     }

@@ -32,18 +32,21 @@ final class TaskListViewModel: ObservableObject {
     private let taskUseCases: TaskUseCases
     private let labelUseCases: LabelUseCases
     private let syncService: SyncService?
+    private let recurrenceUseCases: RecurrenceUseCases?
     let userId: UUID
     // Persist filter selection per user
     @AppStorage("labelFilter_Ids") private var persistedFilterIdsRaw: String = ""
     // Pending selections coming from TaskFormView (via NotificationCenter)
     private var pendingLabelSelections: [UUID: Set<UUID>] = [:]
     private var cancellables: Set<AnyCancellable> = []
+    private var pendingRecurrenceSelections: [UUID: RecurrenceRule] = [:]
     
-    init(taskUseCases: TaskUseCases, labelUseCases: LabelUseCases, userId: UUID, syncService: SyncService? = nil) {
+    init(taskUseCases: TaskUseCases, labelUseCases: LabelUseCases, userId: UUID, syncService: SyncService? = nil, recurrenceUseCases: RecurrenceUseCases? = nil) {
         self.taskUseCases = taskUseCases
         self.labelUseCases = labelUseCases
         self.userId = userId
         self.syncService = syncService
+        self.recurrenceUseCases = recurrenceUseCases
         // Restore persisted filter ids
         if let restored = try? JSONDecoder().decode([UUID].self, from: Data(persistedFilterIdsRaw.utf8)) {
             self.activeFilterLabelIds = Set(restored)
@@ -56,6 +59,16 @@ final class TaskListViewModel: ObservableObject {
                   let ids = note.userInfo?["labelIds"] as? [UUID] else { return }
             _Concurrency.Task { @MainActor in
                 self.pendingLabelSelections[taskId] = Set(ids)
+            }
+        }
+        // Listen for recurrence selection from TaskForm
+        NotificationCenter.default.addObserver(forName: Notification.Name("dm.taskform.recurrence.selection"), object: nil, queue: .main) { [weak self] note in
+            guard let self else { return }
+            guard let taskId = note.userInfo?["taskId"] as? UUID,
+                  let data = note.userInfo?["ruleJSON"] as? Data,
+                  let rule = try? JSONDecoder().decode(RecurrenceRule.self, from: data) else { return }
+            _Concurrency.Task { @MainActor in
+                self.pendingRecurrenceSelections[taskId] = rule
             }
         }
         
@@ -251,6 +264,12 @@ final class TaskListViewModel: ObservableObject {
                     try await taskUseCases.setLabels(for: updated.id, to: desired, userId: userId)
                     pendingLabelSelections.removeValue(forKey: updated.id)
                 }
+                // Apply recurrence if selected
+                if let rule = pendingRecurrenceSelections[updated.id], let recUC = recurrenceUseCases {
+                    let recurrence = Recurrence(userId: userId, taskTemplateId: updated.id, rule: rule)
+                    try? await recUC.create(recurrence)
+                    pendingRecurrenceSelections.removeValue(forKey: updated.id)
+                }
             } else {
                 let newTask = draft.toNewTask()
                 try await taskUseCases.createTask(newTask)
@@ -260,6 +279,11 @@ final class TaskListViewModel: ObservableObject {
                 if let desired = pendingLabelSelections[newTask.id] {
                     try await taskUseCases.setLabels(for: newTask.id, to: desired, userId: userId)
                     pendingLabelSelections.removeValue(forKey: newTask.id)
+                }
+                if let rule = pendingRecurrenceSelections[newTask.id], let recUC = recurrenceUseCases {
+                    let recurrence = Recurrence(userId: userId, taskTemplateId: newTask.id, rule: rule)
+                    try? await recUC.create(recurrence)
+                    pendingRecurrenceSelections.removeValue(forKey: newTask.id)
                 }
             }
             await refreshCounts()
