@@ -239,6 +239,7 @@ final class TaskListViewModel: ObservableObject {
 
     func toggleTaskCompletion(task: Task, refreshIn filter: TimeBucket?) async {
         do {
+            let wasCompleted = task.isCompleted
             if let progress = subtaskProgressByParent[task.id], progress.total > 0 {
                 try await taskUseCases.toggleParentCompletionCascade(parentId: task.id)
             } else {
@@ -246,9 +247,70 @@ final class TaskListViewModel: ObservableObject {
             }
             await refreshCounts()
             await fetchTasks(in: filter)
+            // If this task just became completed and has a recurrence, generate the next instance
+            if wasCompleted == false {
+                await generateNextInstanceIfRecurring(templateTaskId: task.id)
+            }
         } catch {
             errorMessage = "Failed to toggle task completion: \(error.localizedDescription)"
             Logger.shared.error("Failed to toggle task completion", category: .ui, error: error)
+        }
+    }
+
+    // MARK: - Recurrence Actions
+    func generateNow(taskId: UUID) async {
+        await generateNextInstanceIfRecurring(templateTaskId: taskId, anchor: Date())
+    }
+
+    func pauseResume(taskId: UUID) async {
+        guard let recUC = recurrenceUseCases else { return }
+        do {
+            if var rec = try await recUC.getByTaskTemplateId(taskId, userId: userId) {
+                rec.status = (rec.status == "active") ? "paused" : "active"
+                try await recUC.update(rec)
+                await fetchTasks(in: isBoardModeActive ? nil : selectedBucket)
+            }
+        } catch {
+            Logger.shared.error("Failed to pause/resume recurrence", category: .ui, error: error)
+        }
+    }
+
+    func skipNext(taskId: UUID) async {
+        guard let recUC = recurrenceUseCases else { return }
+        do {
+            if var rec = try await recUC.getByTaskTemplateId(taskId, userId: userId) {
+                let anchor = rec.nextScheduledAt ?? Date()
+                if let next = recUC.nextOccurrence(from: anchor, rule: rec.rule) {
+                    rec.nextScheduledAt = next
+                    try await recUC.update(rec)
+                }
+            }
+        } catch {
+            Logger.shared.error("Failed to skip next occurrence", category: .ui, error: error)
+        }
+    }
+
+    private func generateNextInstanceIfRecurring(templateTaskId: UUID, anchor: Date? = nil) async {
+        guard let recUC = recurrenceUseCases else { return }
+        do {
+            guard let rec = try await recUC.getByTaskTemplateId(templateTaskId, userId: userId) else { return }
+            let deps = Dependencies.shared
+            // Load template task with labels
+            let (template, labels) = try await TaskUseCases(
+                tasksRepository: try deps.resolve(type: TasksRepository.self),
+                labelsRepository: try deps.resolve(type: LabelsRepository.self)
+            ).fetchTaskWithLabels(by: templateTaskId) ?? { return }()
+            let anchorDate = anchor ?? template.dueAt ?? Date()
+            guard let next = recUC.nextOccurrence(from: anchorDate, rule: rec.rule) else { return }
+            var newTask = Task(userId: template.userId, bucketKey: template.bucketKey, title: template.title, description: template.description, dueAt: next)
+            try await taskUseCases.createTask(newTask)
+            // copy labels
+            let ids = Set(labels.map { $0.id })
+            try await taskUseCases.setLabels(for: newTask.id, to: ids, userId: userId)
+            await refreshCounts()
+            await fetchTasks(in: isBoardModeActive ? nil : selectedBucket)
+        } catch {
+            Logger.shared.error("Failed to generate next instance", category: .ui, error: error)
         }
     }
     

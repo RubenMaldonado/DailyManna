@@ -232,9 +232,9 @@ private struct InlineBucketColumn: View {
                             onToggleCompletion: { onToggle(pair.0) },
                             subtaskProgress: subtaskProgressByParent[pair.0.id],
                             showsRecursIcon: viewModel.tasksWithRecurrence.contains(pair.0.id),
-                            onPauseResume: { /* wire later */ },
-                            onSkipNext: { /* wire later */ },
-                            onGenerateNow: { /* wire later */ }
+                            onPauseResume: { _Concurrency.Task { await viewModel.pauseResume(taskId: pair.0.id) } },
+                            onSkipNext: { _Concurrency.Task { await viewModel.skipNext(taskId: pair.0.id) } },
+                            onGenerateNow: { _Concurrency.Task { await viewModel.generateNow(taskId: pair.0.id) } }
                         )
                             .contextMenu {
                                 Menu("Move to") {
@@ -769,7 +769,7 @@ private struct TaskRowView: View {
     let onDelete: (Task) -> Void
     
     var body: some View {
-        TaskCard(task: task, labels: labels, onToggleCompletion: { onToggle(task) }, subtaskProgress: subtaskProgress, showsRecursIcon: viewModel.tasksWithRecurrence.contains(task.id), onPauseResume: { /* wire later */ }, onSkipNext: { /* wire later */ }, onGenerateNow: { /* wire later */ })
+        TaskCard(task: task, labels: labels, onToggleCompletion: { onToggle(task) }, subtaskProgress: subtaskProgress, showsRecursIcon: viewModel.tasksWithRecurrence.contains(task.id), onPauseResume: { _Concurrency.Task { await viewModel.pauseResume(taskId: task.id) } }, onSkipNext: { _Concurrency.Task { await viewModel.skipNext(taskId: task.id) } }, onGenerateNow: { _Concurrency.Task { await viewModel.generateNow(taskId: task.id) } })
             .contextMenu {
                 Button("Edit") { onEdit(task) }
                 Menu("Move to") {
