@@ -12,6 +12,7 @@ import SwiftUI
 @MainActor
 final class TaskListViewModel: ObservableObject {
     @Published var tasksWithLabels: [(Task, [Label])] = []
+    @Published var tasksWithRecurrence: Set<UUID> = []
     @Published var subtaskProgressByParent: [UUID: (completed: Int, total: Int)] = [:]
     @Published var isLoading: Bool = false
     @Published var errorMessage: String? = nil
@@ -130,6 +131,7 @@ final class TaskListViewModel: ObservableObject {
             }
             // Apply label filtering if any active
             self.tasksWithLabels = pairs
+            await loadRecurrenceFlags(for: pairs.map { $0.0.id })
             // Load subtask progress for visible items incrementally
             let parentIds = pairs.map { $0.0.id }
             await loadSubtaskProgressIncremental(for: parentIds)
@@ -138,6 +140,17 @@ final class TaskListViewModel: ObservableObject {
             Logger.shared.error("Failed to fetch tasks", category: .ui, error: error)
         }
         isLoading = false
+    }
+
+    private func loadRecurrenceFlags(for taskIds: [UUID]) async {
+        guard let recUC = recurrenceUseCases else { return }
+        do {
+            let recs = try await recUC.list(for: userId)
+            let ids = Set(recs.map { $0.taskTemplateId })
+            await MainActor.run { self.tasksWithRecurrence = ids.intersection(taskIds) }
+        } catch {
+            // non-fatal
+        }
     }
 
     func applyLabelFilter(selected: Set<UUID>, matchAll: Bool) {

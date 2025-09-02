@@ -11,13 +11,15 @@ struct TaskCard: View {
     let task: Task
     let labels: [Label]
     var onToggleCompletion: (() -> Void)?
+    var showsRecursIcon: Bool = false
     var subtaskProgress: (completed: Int, total: Int)? = nil
     
-    init(task: Task, labels: [Label], onToggleCompletion: (() -> Void)? = nil, subtaskProgress: (completed: Int, total: Int)? = nil) {
+    init(task: Task, labels: [Label], onToggleCompletion: (() -> Void)? = nil, subtaskProgress: (completed: Int, total: Int)? = nil, showsRecursIcon: Bool = false) {
         self.task = task
         self.labels = labels
         self.onToggleCompletion = onToggleCompletion
         self.subtaskProgress = subtaskProgress
+        self.showsRecursIcon = showsRecursIcon
     }
     
     var body: some View {
@@ -42,11 +44,17 @@ struct TaskCard: View {
             
             VStack(alignment: .leading, spacing: Spacing.xxSmall) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xxSmall) {
-                    Text(task.title)
+                    HStack(spacing: 6) {
+                        Text(task.title)
                         .style(Typography.headline)
                         .strikethrough(task.isCompleted)
                         .foregroundColor(task.isCompleted ? Colors.onSurfaceVariant : Colors.onSurface)
                         .lineLimit(2)
+                        if showsRecursIcon {
+                            Image(systemName: "arrow.triangle.2.circlepath").font(.caption).foregroundColor(Colors.onSurfaceVariant)
+                                .accessibilityLabel("Repeats")
+                        }
+                    }
                     if let dueAt = task.dueAt { DueChip(date: dueAt, isOverdue: !task.isCompleted && dueAt < Date()) }
                 }
                 
