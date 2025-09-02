@@ -19,6 +19,8 @@ final class SettingsViewModel: ObservableObject {
     private let remoteTasksRepository: RemoteTasksRepository
     private let remoteLabelsRepository: RemoteLabelsRepository
     private let syncService: SyncService
+    private let recurrenceUseCases: RecurrenceUseCases = try! Dependencies.shared.resolve(type: RecurrenceUseCases.self)
+    private let recurrenceUseCases: RecurrenceUseCases = try! Dependencies.shared.resolve(type: RecurrenceUseCases.self)
     let userId: UUID
     
     init(tasksRepository: TasksRepository,
@@ -85,6 +87,25 @@ final class SettingsViewModel: ObservableObject {
             statusMessage = "Samples created"
         } catch {
             statusMessage = "Failed: \(error.localizedDescription)"
+        }
+        isWorking = false
+    }
+
+    func backfillRoutinesToRecurrences() async {
+        guard !isWorking else { return }
+        isWorking = true
+        statusMessage = "Backfilling…"
+        do {
+            // Convert all tasks in ROUTINES bucket to daily recurrences at 8:00 by default
+            let tasks = try await tasksRepository.fetchTasks(for: userId, in: .routines)
+            for t in tasks where t.deletedAt == nil {
+                let rule = RecurrenceRule(freq: .daily, interval: 1, time: "08:00")
+                let rec = Recurrence(userId: userId, taskTemplateId: t.id, rule: rule)
+                try? await recurrenceUseCases.create(rec)
+            }
+            statusMessage = "Backfill complete"
+        } catch {
+            statusMessage = "Backfill failed: \(error.localizedDescription)"
         }
         isWorking = false
     }
@@ -163,6 +184,13 @@ struct SettingsView: View {
                         Text("Generate sample tasks (one per bucket)")
                     }
                     .buttonStyle(PrimaryButtonStyle(size: .small))
+                    .disabled(viewModel.isWorking)
+                    Button {
+                        _Concurrency.Task { await viewModel.backfillRoutinesToRecurrences() }
+                    } label: {
+                        Text("Backfill Routines → Recurrences")
+                    }
+                    .buttonStyle(SecondaryButtonStyle(size: .small))
                     .disabled(viewModel.isWorking)
                 }
                 Section("Labels") {

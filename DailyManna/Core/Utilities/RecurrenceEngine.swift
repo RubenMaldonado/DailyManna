@@ -32,16 +32,14 @@ struct RecurrenceEngine {
 
     private func nextWeekly(from anchor: Date, rule: RecurrenceRule, calendar cal: Calendar) -> Date? {
         let weekdays = (rule.byWeekday ?? []).compactMap { weekdayMap[$0.uppercased()] }
+        // If no specific weekdays, just jump by N weeks
         guard weekdays.isEmpty == false else { return addDays(anchor, 7 * max(1, rule.interval), cal, time: rule.time) }
-        let todayWD = cal.component(.weekday, from: anchor)
-        // search next 14 days
-        for i in 1...(14) {
-            if let d = cal.date(byAdding: .day, value: i, to: anchor) {
-                let wd = cal.component(.weekday, from: d)
-                if weekdays.contains(wd) {
-                    // ensure interval weeks boundary
-                    if i % (7 * max(1, rule.interval)) == 0 || weekdays.count > 1 { return applyTime(d, rule.time, cal) }
-                }
+        // Search the next 21 days to find the first matching weekday; keep it simple for v1
+        for i in 1...21 {
+            guard let d = cal.date(byAdding: .day, value: i, to: anchor) else { continue }
+            let wd = cal.component(.weekday, from: d)
+            if weekdays.contains(wd) {
+                return applyTime(d, rule.time, cal)
             }
         }
         return nil
@@ -52,7 +50,12 @@ struct RecurrenceEngine {
         var nextMonth = cal.date(byAdding: .month, value: interval, to: anchor) ?? anchor
         if let days = rule.byMonthDay, let day = days.first {
             var comps = cal.dateComponents([.year,.month], from: nextMonth)
-            comps.day = min(day, 28) // safe default; follow-up passes adjust overflow
+            // Clamp to last valid day of target month to avoid overflow (e.g., 31st on Feb)
+            if let target = cal.date(from: comps), let range = cal.range(of: .day, in: .month, for: target) {
+                comps.day = min(day, range.count)
+            } else {
+                comps.day = day
+            }
             return applyTime(cal.date(from: comps), rule.time, cal)
         }
         if let byWD = rule.byWeekday, let byPos = rule.bySetPos?.first, let wdSym = byWD.first, let wd = weekdayMap[wdSym] {
@@ -72,7 +75,14 @@ struct RecurrenceEngine {
         var comps = cal.dateComponents([.year], from: anchor)
         comps.year = comps.year! + interval
         comps.month = month
-        comps.day = min(day, 28)
+        // Clamp to last valid day of that month/year
+        var temp = comps
+        temp.day = 1
+        if let base = cal.date(from: temp), let range = cal.range(of: .day, in: .month, for: base) {
+            comps.day = min(day, range.count)
+        } else {
+            comps.day = day
+        }
         return applyTime(cal.date(from: comps), rule.time, cal)
     }
 
