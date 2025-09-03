@@ -16,6 +16,7 @@ enum LogCategory: String {
     case network = "Network"
     case sync = "Sync"
     case auth = "Auth"
+    case perf = "Perf"
 }
 
 final class Logger {
@@ -37,6 +38,20 @@ final class Logger {
     
     func info(_ message: String, category: LogCategory = .general) {
         log(message, category: category, type: .info)
+    }
+    
+    // Lightweight performance timer
+    func time<T>(_ label: String, category: LogCategory = .perf, _ block: () async throws -> T) async rethrows -> T {
+        #if DEBUG
+        let start = DispatchTime.now().uptimeNanoseconds
+        let value = try await block()
+        let end = DispatchTime.now().uptimeNanoseconds
+        let ms = Double(end - start) / 1_000_000.0
+        debug("\(label) took \(String(format: "%.2f", ms)) ms", category: category)
+        return value
+        #else
+        return try await block()
+        #endif
     }
     
     func error(_ message: String, category: LogCategory = .general, error: Error? = nil) {

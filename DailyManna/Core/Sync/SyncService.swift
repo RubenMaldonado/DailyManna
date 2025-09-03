@@ -41,8 +41,11 @@ final class SyncService: ObservableObject {
     
     /// Performs a full bidirectional sync for a specific user
     func sync(for userId: UUID) async {
-        guard !isSyncing else {
-            Logger.shared.info("Sync already in progress, skipping", category: .sync)
+        // Single-flight with queued rerun
+        struct Flags { static var rerunRequested = false }
+        if isSyncing {
+            Flags.rerunRequested = true
+            Logger.shared.info("Sync already in progress, queueing rerun", category: .sync)
             return
         }
         
@@ -83,6 +86,10 @@ final class SyncService: ObservableObject {
         }
         
         isSyncing = false
+        if Flags.rerunRequested {
+            Flags.rerunRequested = false
+            _Concurrency.Task { await self.sync(for: userId) }
+        }
     }
     
     /// Syncs tasks bidirectionally
