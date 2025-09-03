@@ -289,7 +289,7 @@ This document outlines a prioritized, iterative development approach for Daily M
 - [x] Add subtask drag-and-drop reordering
 - [x] Sync subtask relationships
 
-### Epic 2.3: Due Dates & Scheduling
+### Epic 2.3: Due Dates & Scheduling | COMPLETED
 **Priority**: Medium
 **Estimated Effort**: 1 week
 **Goal**: Add time-specific task management within buckets
@@ -300,11 +300,11 @@ This document outlines a prioritized, iterative development approach for Daily M
 - As a user, I can sort tasks by due date within buckets
 
 **Acceptance Criteria**:
-- [ ] Add due date/time picker to task creation/editing
-- [ ] Implement due date display in task lists
-- [ ] Create overdue task indicators
-- [ ] Add due date-based sorting options
-- [ ] Implement basic reminder system (local notifications)
+- [x] Add due date/time picker to task creation/editing
+- [x] Implement due date display in task lists
+- [x] Create overdue task indicators
+- [x] Add due date-based sorting options
+- [x] Implement basic reminder system (local notifications)
 
 ### Epic 2.4: macOS-Specific Enhancements
 **Priority**: Medium
@@ -327,7 +327,7 @@ This document outlines a prioritized, iterative development approach for Daily M
 
 ## Phase 3: Advanced Features & Polish (Weeks 15-20)
 
-### Epic 3.1: Routines & Recurrence
+### Epic 3.1: Routines & Recurrence | COMPLETED
 **Priority**: Medium
 **Estimated Effort**: 2 weeks
 **Goal**: Implement sophisticated recurring task management
