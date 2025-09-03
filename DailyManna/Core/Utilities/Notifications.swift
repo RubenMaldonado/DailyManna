@@ -3,6 +3,12 @@ import UserNotifications
 import SwiftUI
 
 enum NotificationsManager {
+    private enum PendingOp {
+        case schedule(title: String, dueAt: Date, bucketKey: String)
+        case cancel
+    }
+    private static var pendingByTask: [UUID: DispatchWorkItem] = [:]
+    private static let queue = DispatchQueue(label: "dm.notifications", qos: .userInitiated)
     static func requestAuthorizationIfNeeded() async {
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
@@ -11,21 +17,44 @@ enum NotificationsManager {
         }
     }
     static func scheduleDueNotification(taskId: UUID, title: String, dueAt: Date, bucketKey: String) async {
-        let enabled = UserDefaults.standard.bool(forKey: "dueNotificationsEnabled")
-        guard enabled else { return }
-        await requestAuthorizationIfNeeded()
-        let content = UNMutableNotificationContent()
-        content.title = "Task Due"
-        content.body = title
-        content.sound = .default
-        content.userInfo = ["taskId": taskId.uuidString, "bucket_key": bucketKey]
-        let comps = Calendar.current.dateComponents([.year,.month,.day,.hour,.minute,.second], from: dueAt)
-        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
-        let req = UNNotificationRequest(identifier: taskId.uuidString, content: content, trigger: trigger)
-        try? await UNUserNotificationCenter.current().add(req)
+        enqueue(taskId: taskId, op: .schedule(title: title, dueAt: dueAt, bucketKey: bucketKey))
     }
     static func cancelDueNotification(taskId: UUID) async {
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [taskId.uuidString])
+        enqueue(taskId: taskId, op: .cancel)
+    }
+
+    private static func enqueue(taskId: UUID, op: PendingOp) {
+        queue.async {
+            // Cancel any previous pending op for this task
+            if let pending = pendingByTask[taskId] { pending.cancel() }
+            let work = DispatchWorkItem {
+                Task { await perform(taskId: taskId, op: op) }
+            }
+            pendingByTask[taskId] = work
+            // Debounce 200ms to coalesce bursts (edit/save/sync)
+            queue.asyncAfter(deadline: .now() + 0.2, execute: work)
+        }
+    }
+
+    private static func perform(taskId: UUID, op: PendingOp) async {
+        switch op {
+        case .cancel:
+            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [taskId.uuidString])
+        case let .schedule(title, dueAt, bucketKey):
+            let enabled = UserDefaults.standard.bool(forKey: "dueNotificationsEnabled")
+            guard enabled else { return }
+            await requestAuthorizationIfNeeded()
+            let content = UNMutableNotificationContent()
+            content.title = "Task Due"
+            content.body = title
+            content.sound = .default
+            content.userInfo = ["taskId": taskId.uuidString, "bucket_key": bucketKey]
+            let comps = Calendar.current.dateComponents([.year,.month,.day,.hour,.minute,.second], from: dueAt)
+            let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+            let req = UNNotificationRequest(identifier: taskId.uuidString, content: content, trigger: trigger)
+            try? await UNUserNotificationCenter.current().add(req)
+        }
+        queue.async { pendingByTask[taskId] = nil }
     }
 }
 
