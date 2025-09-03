@@ -29,6 +29,7 @@ final class TaskListViewModel: ObservableObject {
     @Published var activeFilterLabelIds: Set<UUID> = []
     @Published var matchAll: Bool = false
     @Published var unlabeledOnly: Bool = false
+    @Published var availableOnly: Bool = false
     
     private let taskUseCases: TaskUseCases
     private let labelUseCases: LabelUseCases
@@ -118,6 +119,18 @@ final class TaskListViewModel: ObservableObject {
                     }
                 }
             }
+            // Apply built-in "Available" filter first (session-only)
+            if availableOnly {
+                let calendar = Calendar.current
+                let now = Date()
+                let endOfToday = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: now) ?? now
+                pairs = pairs.filter { pair in
+                    let t = pair.0
+                    guard t.isCompleted == false else { return false }
+                    if let due = t.dueAt { return due <= endOfToday }
+                    return true
+                }
+            }
             // Apply unlabeled-only filter or label-based filter
             if unlabeledOnly {
                 pairs = pairs.filter { $0.1.isEmpty }
@@ -172,6 +185,13 @@ final class TaskListViewModel: ObservableObject {
         }
     }
 
+    func setAvailableFilter(_ enabled: Bool) {
+        self.availableOnly = enabled
+        _Concurrency.Task {
+            await fetchTasks(in: isBoardModeActive ? nil : selectedBucket)
+        }
+    }
+
     private func loadSubtaskProgressIncremental(for parentIds: [UUID]) async {
         await withTaskGroup(of: (UUID, (Int, Int)?).self) { group in
             for pid in parentIds {
@@ -195,6 +215,7 @@ final class TaskListViewModel: ObservableObject {
         activeFilterLabelIds.removeAll()
         matchAll = false
         unlabeledOnly = false
+        availableOnly = false
         _Concurrency.Task { await fetchTasks(in: isBoardModeActive ? nil : selectedBucket) }
         persistFilterIds()
     }

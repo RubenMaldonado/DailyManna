@@ -71,6 +71,11 @@ struct TaskListView: View {
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("dm.filter.unlabeled"))) { _ in
             viewModel.applyUnlabeledFilter()
         }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("dm.filter.available.toggle"))) { note in
+            if let enabled = note.userInfo?["enabled"] as? Bool {
+                viewModel.setAvailableFilter(enabled)
+            }
+        }
         #if os(macOS)
         .onChange(of: viewMode) { _, mode in
             _Concurrency.Task {

@@ -99,6 +99,10 @@ struct FilterBarView: View {
                 Menu("Options") {
                     Toggle(isOn: $vm.matchAll) { Text("Match all") }
                     Toggle(isOn: Binding(get: { UserDefaults.standard.bool(forKey: "sortByDueDate") }, set: { UserDefaults.standard.set($0, forKey: "sortByDueDate"); onSelectionChanged?(vm.selectedLabelIds, vm.matchAll) })) { Text("Sort by Due Date") }
+                    Toggle(isOn: Binding(get: { UserDefaults.standard.bool(forKey: "availableOnly") }, set: { val in
+                        UserDefaults.standard.set(val, forKey: "availableOnly")
+                        NotificationCenter.default.post(name: Notification.Name("dm.filter.available.toggle"), object: nil, userInfo: ["enabled": val])
+                    })) { Text("Available") }
                     if vm.selectedLabelIds.isEmpty == false {
                         Divider()
                         Button("Clear") { clearAll() }
