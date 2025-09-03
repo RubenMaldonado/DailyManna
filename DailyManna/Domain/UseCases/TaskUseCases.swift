@@ -37,14 +37,20 @@ public final class TaskUseCases {
     /// Fetches all tasks for a user, optionally filtered by bucket, and includes their associated labels
     public func fetchTasksWithLabels(for userId: UUID, in bucket: TimeBucket?) async throws -> [(Task, [Label])] {
         let tasks = try await tasksRepository.fetchTasks(for: userId, in: bucket)
-        var result: [(Task, [Label])] = []
-        
-        for task in tasks.filter({ !$0.isDeleted }) {
-            let labels = try await labelsRepository.fetchLabelsForTask(task.id)
-            result.append((task, labels.filter { !$0.isDeleted }))
+        let visible = tasks.filter { !$0.isDeleted }
+        // Parallelize label fetches to reduce end-to-end latency for larger lists
+        return try await withThrowingTaskGroup(of: (Task, [Label]).self) { group in
+            for task in visible {
+                group.addTask { [labelsRepository] in
+                    let labels = try await labelsRepository.fetchLabelsForTask(task.id).filter { !$0.isDeleted }
+                    return (task, labels)
+                }
+            }
+            var output: [(Task, [Label])] = []
+            output.reserveCapacity(visible.count)
+            for try await pair in group { output.append(pair) }
+            return output
         }
-        
-        return result
     }
     
     /// Fetches a specific task by ID, including its associated labels

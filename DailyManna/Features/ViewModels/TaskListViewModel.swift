@@ -237,6 +237,13 @@ final class TaskListViewModel: ObservableObject {
     }
 
     func refreshCounts() async {
+        static let throttleKey = "countsThrottleKey"
+        // Simple throttle: if another refresh finished within 300ms, skip
+        let now = Date().timeIntervalSince1970
+        let last = UserDefaults.standard.double(forKey: Self.throttleKey)
+        if now - last < 0.3 { return }
+        UserDefaults.standard.set(now, forKey: Self.throttleKey)
+
         var counts: [TimeBucket: Int] = [:]
         await withTaskGroup(of: (TimeBucket, Int).self) { group in
             for bucket in TimeBucket.allCases.sorted(by: { $0.sortOrder < $1.sortOrder }) {
