@@ -36,6 +36,7 @@ final class TaskListViewModel: ObservableObject {
     private let syncService: SyncService?
     private let recurrenceUseCases: RecurrenceUseCases?
     let userId: UUID
+    private static let countsThrottleKey = "countsThrottleKey"
     // Persist filter selection per user
     @AppStorage("labelFilter_Ids") private var persistedFilterIdsRaw: String = ""
     // Pending selections coming from TaskFormView (via NotificationCenter)
@@ -126,7 +127,7 @@ final class TaskListViewModel: ObservableObject {
                 let calendar = Calendar.current
                 let now = Date()
                 let endOfToday = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: now) ?? now
-                pairs = try await Logger.shared.time("filterAvailable", category: .perf) {
+                pairs = await Logger.shared.time("filterAvailable", category: .perf) {
                     let filtered = pairs.filter { pair in
                         let t = pair.0
                         guard t.isCompleted == false else { return false }
@@ -138,10 +139,10 @@ final class TaskListViewModel: ObservableObject {
             }
             // Apply unlabeled-only filter or label-based filter
             if unlabeledOnly {
-                pairs = try await Logger.shared.time("filterUnlabeled", category: .perf) { pairs.filter { $0.1.isEmpty } }
+                pairs = await Logger.shared.time("filterUnlabeled", category: .perf) { pairs.filter { $0.1.isEmpty } }
             } else if activeFilterLabelIds.isEmpty == false {
                 let target = activeFilterLabelIds
-                pairs = try await Logger.shared.time("filterByLabels", category: .perf) {
+                pairs = await Logger.shared.time("filterByLabels", category: .perf) {
                     pairs.filter { pair in
                         let ids = Set(pair.1.map { $0.id })
                         return matchAll ? ids.isSuperset(of: target) : ids.intersection(target).isEmpty == false
@@ -243,12 +244,11 @@ final class TaskListViewModel: ObservableObject {
     }
 
     func refreshCounts() async {
-        static let throttleKey = "countsThrottleKey"
         // Simple throttle: if another refresh finished within 300ms, skip
         let now = Date().timeIntervalSince1970
-        let last = UserDefaults.standard.double(forKey: Self.throttleKey)
+        let last = UserDefaults.standard.double(forKey: Self.countsThrottleKey)
         if now - last < 0.3 { return }
-        UserDefaults.standard.set(now, forKey: Self.throttleKey)
+        UserDefaults.standard.set(now, forKey: Self.countsThrottleKey)
 
         var counts: [TimeBucket: Int] = [:]
         await withTaskGroup(of: (TimeBucket, Int).self) { group in
