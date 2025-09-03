@@ -109,7 +109,7 @@ private struct BucketColumn: View {
                                 .frame(height: 2)
                                 .padding(.vertical, 2)
                         }
-                        TaskCard(task: pair.0, labels: pair.1) { onToggle(pair.0) }
+                        TaskCard(task: pair.0, labels: pair.1, onToggleCompletion: { onToggle(pair.0) })
                             .contextMenu {
                                 Button("Edit") { onEdit(pair.0) }
                                 Button(role: .destructive) { onDelete(pair.0) } label: { Text("Delete") }

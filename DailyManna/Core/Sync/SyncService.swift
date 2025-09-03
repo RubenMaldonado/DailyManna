@@ -261,7 +261,7 @@ final class SyncService: ObservableObject {
                 guard let next = rec.nextScheduledAt, next <= Date() else { continue }
                 // Load template task and labels
                 if let (template, labels) = try await taskUC.fetchTaskWithLabels(by: rec.taskTemplateId) {
-                    var newTask = Task(userId: template.userId, bucketKey: template.bucketKey, title: template.title, description: template.description, dueAt: next)
+                    let newTask = Task(userId: template.userId, bucketKey: template.bucketKey, title: template.title, description: template.description, dueAt: next)
                     try await taskUC.createTask(newTask)
                     let labelIds = Set(labels.map { $0.id })
                     try await taskUC.setLabels(for: newTask.id, to: labelIds, userId: userId)

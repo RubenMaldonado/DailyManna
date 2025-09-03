@@ -322,7 +322,7 @@ final class TaskListViewModel: ObservableObject {
             guard let next = recUC.nextOccurrence(from: anchorDate, rule: rec.rule) else { return }
             Logger.shared.info("Generate next instance for template=\(effectiveTemplateId) at=\(next)", category: .ui)
             // Important: link new instance to template via parentTaskId
-            var newTask = Task(userId: template.userId, bucketKey: template.bucketKey, parentTaskId: effectiveTemplateId, title: template.title, description: template.description, dueAt: next)
+            let newTask = Task(userId: template.userId, bucketKey: template.bucketKey, parentTaskId: effectiveTemplateId, title: template.title, description: template.description, dueAt: next)
             try await taskUseCases.createTask(newTask)
             // Persist next scheduled on recurrence to avoid duplicate generation bursts
             var updatedRec = rec
