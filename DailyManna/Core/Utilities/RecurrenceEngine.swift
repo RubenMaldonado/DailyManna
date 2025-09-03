@@ -47,7 +47,7 @@ struct RecurrenceEngine {
 
     private func nextMonthly(from anchor: Date, rule: RecurrenceRule, calendar cal: Calendar) -> Date? {
         let interval = max(1, rule.interval)
-        var nextMonth = cal.date(byAdding: .month, value: interval, to: anchor) ?? anchor
+        let nextMonth = cal.date(byAdding: .month, value: interval, to: anchor) ?? anchor
         if let days = rule.byMonthDay, let day = days.first {
             var comps = cal.dateComponents([.year,.month], from: nextMonth)
             // Clamp to last valid day of target month to avoid overflow (e.g., 31st on Feb)

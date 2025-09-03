@@ -163,7 +163,7 @@ actor SwiftDataTasksRepository: TasksRepository {
     }
 
     func nextSubtaskBottomPosition(parentTaskId: UUID) async throws -> Double {
-        var descriptor = FetchDescriptor<TaskEntity>(
+        let descriptor = FetchDescriptor<TaskEntity>(
             predicate: #Predicate<TaskEntity> { entity in
                 entity.parentTaskId == parentTaskId && entity.deletedAt == nil && entity.isCompleted == false
             },

@@ -122,7 +122,8 @@ final class SupabaseTasksRepository: RemoteTasksRepository {
         // Subscribe to table changes for hinting sync using RealtimeChannelV2 async stream API
         let channel = client.channel("dm_tasks_\(userId.uuidString)")
         self.tasksChannel = channel
-        let changes = await channel.postgresChange(AnyAction.self, schema: "public", table: "tasks", filter: .eq("user_id", value: userId.uuidString))
+        // postgresChange returns an async stream immediately; no need to await its creation
+        let changes = channel.postgresChange(AnyAction.self, schema: "public", table: "tasks", filter: .eq("user_id", value: userId.uuidString))
         do {
             try await channel.subscribeWithError()
         } catch {
