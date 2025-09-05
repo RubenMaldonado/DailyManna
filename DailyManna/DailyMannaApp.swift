@@ -12,6 +12,7 @@ import SwiftData
 @main
 struct DailyMannaApp: App {
     @StateObject private var authService: AuthenticationService
+    @AppStorage("appearance") private var appearanceRaw: String = "system" // system | light | dark
     
     init() {
         // Initialize stored properties first
@@ -43,6 +44,7 @@ struct DailyMannaApp: App {
                         .environmentObject(authService)
                 }
             }
+            .preferredColorScheme(preferredScheme())
             .task {
                 await authService.runAuthLifecycle()
                  #if canImport(UIKit)
@@ -66,6 +68,14 @@ struct DailyMannaApp: App {
     private func configureDesignSystem() {
         // Configure any global UI appearance here if needed
         Logger.shared.info("Design system configured", category: .ui)
+    }
+    
+    private func preferredScheme() -> ColorScheme? {
+        switch appearanceRaw {
+        case "light": return .light
+        case "dark": return .dark
+        default: return nil // follow system
+        }
     }
     
     private func getModelContainer() -> ModelContainer {

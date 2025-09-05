@@ -3,11 +3,12 @@ import UserNotifications
 import SwiftUI
 
 enum NotificationsManager {
-    private enum PendingOp {
+    private enum PendingOp: Equatable {
         case schedule(title: String, dueAt: Date, bucketKey: String)
         case cancel
     }
     private static var pendingByTask: [UUID: DispatchWorkItem] = [:]
+    private static var lastEnqueuedOp: [UUID: PendingOp] = [:]
     private static let queue = DispatchQueue(label: "dm.notifications", qos: .userInitiated)
     static func requestAuthorizationIfNeeded() async {
         let center = UNUserNotificationCenter.current()
@@ -27,8 +28,11 @@ enum NotificationsManager {
         queue.async {
             // Cancel any previous pending op for this task
             if let pending = pendingByTask[taskId] { pending.cancel() }
+            // Skip no-op reschedule if same as last
+            if let last = lastEnqueuedOp[taskId], last == op { return }
+            lastEnqueuedOp[taskId] = op
             let work = DispatchWorkItem {
-                Task { await perform(taskId: taskId, op: op) }
+                _Concurrency.Task { await perform(taskId: taskId, op: op) }
             }
             pendingByTask[taskId] = work
             // Debounce 200ms to coalesce bursts (edit/save/sync)

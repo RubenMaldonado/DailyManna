@@ -20,6 +20,10 @@ final class SettingsViewModel: ObservableObject {
     private let remoteLabelsRepository: RemoteLabelsRepository
     private let syncService: SyncService
     private let recurrenceUseCases: RecurrenceUseCases = try! Dependencies.shared.resolve(type: RecurrenceUseCases.self)
+    #if DEBUG
+    @Published var isSoakRunning: Bool = false
+    private var soakHarness: SoakTestHarness? = nil
+    #endif
     
     let userId: UUID
     
@@ -134,6 +138,32 @@ final class SettingsViewModel: ObservableObject {
         return "macOS"
         #endif
     }
+
+    #if DEBUG
+    func setSoak(enabled: Bool) {
+        guard enabled != isSoakRunning else { return }
+        do {
+            if enabled {
+                let deps = Dependencies.shared
+                let harness = SoakTestHarness(
+                    userId: userId,
+                    syncService: try deps.resolve(type: SyncService.self),
+                    taskUseCases: try deps.resolve(type: TaskUseCases.self),
+                    labelUseCases: try deps.resolve(type: LabelUseCases.self)
+                )
+                self.soakHarness = harness
+                harness.start()
+                isSoakRunning = true
+            } else {
+                soakHarness?.stop()
+                soakHarness = nil
+                isSoakRunning = false
+            }
+        } catch {
+            Logger.shared.error("Failed to toggle soak harness", category: .ui, error: error)
+        }
+    }
+    #endif
 }
 
 struct SettingsView: View {
@@ -144,9 +174,28 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Appearance") {
+                    Picker("Theme", selection: Binding(get: { UserDefaults.standard.string(forKey: "appearance") ?? "system" }, set: { UserDefaults.standard.set($0, forKey: "appearance") })) {
+                        Text("System").tag("system")
+                        Text("Light").tag("light")
+                        Text("Dark").tag("dark")
+                    }
+                    .pickerStyle(.segmented)
+                }
                 Section("Features") {
                     Toggle("Enable Subtasks & Rich Descriptions", isOn: $viewModel.featureSubtasksEnabled)
                 }
+                #if DEBUG
+                Section("Testing") {
+                    Toggle(
+                        "Soak test: background activity",
+                        isOn: Binding(
+                            get: { viewModel.isSoakRunning },
+                            set: { newValue in viewModel.setSoak(enabled: newValue) }
+                        )
+                    )
+                }
+                #endif
                 Section("Reminders") {
                     Toggle("Due date notifications", isOn: Binding(get: { UserDefaults.standard.bool(forKey: "dueNotificationsEnabled") }, set: { UserDefaults.standard.set($0, forKey: "dueNotificationsEnabled") }))
                     if #available(iOS 15.0, *) {

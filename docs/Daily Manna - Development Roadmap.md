@@ -323,6 +323,45 @@ This document outlines a prioritized, iterative development approach for Daily M
 - [ ] Add Focus and tab navigation
 - [ ] Implement proper macOS window restoration
 
+### Epic 2.5: Task Composer 2.0 (Add Task Window)
+**Priority**: Medium-High
+**Estimated Effort**: 2 weeks
+**Goal**: Redesign the add task experience as a fast, chip-driven composer (iOS + macOS), inspired by best-in-class apps while matching Daily Manna’s buckets/labels model.
+
+**User Stories**:
+- As a user, I can add a task quickly with title only and submit in one keystroke.
+- As a user, I can add details inline using chips: Labels, Priority, Date/Time, Reminders, Repeat.
+- As a user, I can pick the bucket (project) at the bottom with quick search and recents.
+- As a macOS user, I can do everything with the keyboard (shortcuts, arrows, type-to-search).
+- As a user, my draft is preserved if I close the composer accidentally.
+
+**Acceptance Criteria**:
+- [ ] New `TaskComposerView` with: Title, Description, Chips row (Labels, Priority, Date, Reminders, Repeat), Bucket picker, Cancel/Add CTA.
+- [ ] Chips use presets-first popovers; advanced options inline (calendar/time, recurrence picker, reminder time).
+- [ ] Keyboard shortcuts: Return submit; Cmd+Return submit; Esc cancel; 1–4 priority; arrows navigate menus.
+- [ ] Draft autosave and restore; cleared on successful submit.
+- [ ] Theme parity (light/dark); accessible labels and focus order.
+- [ ] Telemetry: open→submit time, cancel rate, chip usage.
+
+**Implementation Plan**
+- View: Create `TaskComposerView` and base chip components (reusing existing pickers where possible).
+- Data: Extend `TaskDraft` with `priority` (enum) and `reminders: [Date]` (deferred if out of scope for MVP).
+- Wiring: Submit through `TaskListViewModel.save(draft:)`; post recurrence and label selections via existing NotificationCenter hooks.
+- macOS: Add robust keyboard navigation and shortcuts.
+- Telemetry: Instrument timings and chip selections.
+
+**Milestones (est. 2 weeks)**
+- Days 1–2: UX spec/prototype; base `TaskComposerView` with Title/Description and Date chip.
+- Days 3–4: Repeat chip wired to `RecurrencePicker`; Bucket picker & CTAs; basic submit.
+- Days 5–7: Labels selector integration; Priority; Reminders (basic presets).
+- Days 8–9: Keyboard polish (macOS), draft autosave, telemetry, a11y pass.
+- Day 10: Tests (UI + unit), docs, and rollout.
+
+**Definition of Done**
+- Composer replaces old add-task sheet; editing continues to use existing form for now.
+- Submit path reliable; drafts persist; keyboard flow strong on macOS.
+- Tests green; no regressions; telemetry dashboards show usage.
+
 ---
 
 ## Phase 3: Advanced Features & Polish (Weeks 15-20)

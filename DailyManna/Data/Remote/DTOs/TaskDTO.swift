@@ -53,6 +53,7 @@ struct TaskDTO: Codable {
             description: description,
             dueAt: due_at,
             recurrenceRule: recurrence_rule,
+            // priority/reminders remain local-only until backend columns exist
             isCompleted: is_completed,
             completedAt: completed_at,
             createdAt: created_at,

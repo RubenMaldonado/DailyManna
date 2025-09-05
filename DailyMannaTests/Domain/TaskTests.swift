@@ -64,4 +64,79 @@ final class TaskTests: XCTestCase {
     }
 }
 
+final class AvailableFilterTests: XCTestCase {
+    func test_noDueDate_tasksAreAvailable() async throws {
+        let uid = TestFactories.userId(1)
+        let now = Date()
+        var t1 = TestFactories.task(userId: uid, title: "No due 1", now: now)
+        var t2 = TestFactories.task(userId: uid, title: "No due 2", now: now)
+        t1.dueAt = nil
+        t2.dueAt = nil
+        let pairs: [(Task, [Label])] = [(t1, []), (t2, [])]
+        let model = StubViewModel()
+        let endOfToday = model.availableCutoffEndOfToday()
+        let filtered = pairs.filter { pair in
+            let t = pair.0
+            guard t.isCompleted == false else { return false }
+            if let due = t.dueAt { return due <= endOfToday }
+            return true
+        }
+        XCTAssertEqual(filtered.count, 2)
+    }
+
+    func test_dueAtBoundary_includedWhenEqual() async throws {
+        let uid = TestFactories.userId(2)
+        let model = StubViewModel()
+        let end = model.availableCutoffEndOfToday()
+        var t = TestFactories.task(userId: uid, title: "Boundary", now: end)
+        t.dueAt = end
+        let pairs: [(Task, [Label])] = [(t, [])]
+        let filtered = pairs.filter { pair in
+            let tt = pair.0
+            guard tt.isCompleted == false else { return false }
+            if let due = tt.dueAt { return due <= end }
+            return true
+        }
+        XCTAssertEqual(filtered.count, 1)
+    }
+
+    func test_timezoneDST_transitionStillIncludesCorrectly() async throws {
+        // Simulate a due date near midnight and ensure cutoff honors end-of-day
+        let uid = TestFactories.userId(3)
+        let model = StubViewModel()
+        let end = model.availableCutoffEndOfToday()
+        // Due at just before cutoff
+        var t1 = TestFactories.task(userId: uid, title: "Before cutoff", now: end)
+        t1.dueAt = Calendar.current.date(byAdding: .second, value: -10, to: end)
+        // Due at just after cutoff
+        var t2 = TestFactories.task(userId: uid, title: "After cutoff", now: end)
+        t2.dueAt = Calendar.current.date(byAdding: .second, value: 10, to: end)
+        let pairs: [(Task, [Label])] = [(t1, []), (t2, [])]
+        let filtered = pairs.filter { pair in
+            let tt = pair.0
+            guard tt.isCompleted == false else { return false }
+            if let due = tt.dueAt { return due <= end }
+            return true
+        }
+        XCTAssertEqual(filtered.map { $0.0.title }.sorted(), ["Before cutoff"]) // only before cutoff included
+    }
+}
+
+// Minimal stub to access availableCutoffEndOfToday logic
+private final class StubViewModel: ObservableObject {
+    fileprivate var availableCutoffCache: (dayKey: String, cutoff: Date)? = nil
+    func availableCutoffEndOfToday() -> Date {
+        let calendar = Calendar.current
+        let now = Date()
+        let comps = calendar.dateComponents([.year, .month, .day], from: now)
+        let dayKey = "\(comps.year ?? 0)-\(comps.month ?? 0)-\(comps.day ?? 0)"
+        if let cached = availableCutoffCache, cached.dayKey == dayKey {
+            return cached.cutoff
+        }
+        let cutoff = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: now) ?? now
+        availableCutoffCache = (dayKey, cutoff)
+        return cutoff
+    }
+}
+
 

@@ -22,7 +22,9 @@ final class SupabaseTasksRepository: RemoteTasksRepository {
         
         let response: TaskDTO = try await client
             .from("tasks")
-            .insert(dto)
+            // Use primary key upsert to avoid duplicate key errors when a task
+            // with the same id was previously created (e.g., after retries)
+            .upsert(dto, onConflict: "id")
             .select()
             .single()
             .execute()
@@ -47,6 +49,31 @@ final class SupabaseTasksRepository: RemoteTasksRepository {
         
         let tasks = response.map { $0.toDomain() }
         Logger.shared.info("Fetched \(tasks.count) tasks since \(lastSync?.description ?? "beginning")", category: .data)
+        return tasks
+    }
+    
+    func fetchTasks(since lastSync: Date?, bucketKey: String?, dueBy: Date?) async throws -> [Task] {
+        var query = client
+            .from("tasks")
+            .select("*")
+
+        if let lastSync {
+            query = query.gte("updated_at", value: lastSync.ISO8601Format())
+        }
+        if let bucketKey {
+            query = query.eq("bucket_key", value: bucketKey)
+        }
+        if let dueBy {
+            query = query.lte("due_at", value: dueBy.ISO8601Format())
+        }
+        // exclude soft-deleted rows for trimmed pulls
+        query = query.is("deleted_at", value: nil)
+
+        let response: [TaskDTO] = try await query
+            .execute()
+            .value
+        let tasks = response.map { $0.toDomain() }
+        Logger.shared.info("Fetched ctx-trimmed \(tasks.count) tasks since=\(lastSync?.description ?? "nil") bucket=\(bucketKey ?? "nil") dueBy=\(dueBy?.description ?? "nil")", category: .data)
         return tasks
     }
     

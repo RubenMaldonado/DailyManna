@@ -15,6 +15,21 @@ struct BucketBoardView: View {
     var body: some View {
         ScrollView(.horizontal) {
             HStack(spacing: Spacing.medium) {
+                if let t = viewModel.pendingDelete {
+                    Banner(kind: .warning, message: "\"\(t.title)\" will be moved to trash.")
+                        .frame(maxWidth: .infinity)
+                        .overlay(
+                            HStack(spacing: 8) {
+                                Spacer()
+                                Button("Cancel") { viewModel.pendingDelete = nil }
+                                    .buttonStyle(SecondaryButtonStyle(size: .small))
+                                Button("Delete", role: .destructive) { _Concurrency.Task { await viewModel.performDelete() } }
+                                    .buttonStyle(PrimaryButtonStyle(size: .small))
+                            }
+                            .padding(.trailing, 24)
+                        )
+                        .padding(.bottom, Spacing.small)
+                }
                 ForEach(TimeBucket.allCases.sorted { $0.sortOrder < $1.sortOrder }) { bucket in
                     BucketColumn(
                         bucket: bucket,
@@ -68,12 +83,6 @@ struct BucketBoardView: View {
                 Text("No task selected").padding()
             }
         }
-        .alert("Delete Task?", isPresented: Binding(get: { viewModel.pendingDelete != nil }, set: { if !$0 { viewModel.pendingDelete = nil } })) {
-            Button("Cancel", role: .cancel) {}
-            Button("Delete", role: .destructive) { _Concurrency.Task { await viewModel.performDelete() } }
-        } message: {
-            if let t = viewModel.pendingDelete { Text("\"\(t.title)\" will be moved to trash.") }
-        }
         .task {
             await viewModel.refreshCounts()
             // Fetch all for the board so every column has data
@@ -109,7 +118,7 @@ private struct BucketColumn: View {
                                 .frame(height: 2)
                                 .padding(.vertical, 2)
                         }
-                        TaskCard(task: pair.0, labels: pair.1, onToggleCompletion: { onToggle(pair.0) })
+                        TaskCard(task: pair.0, labels: pair.1, layout: .board, onToggleCompletion: { onToggle(pair.0) })
                             .contextMenu {
                                 Button("Edit") { onEdit(pair.0) }
                                 Button(role: .destructive) { onDelete(pair.0) } label: { Text("Delete") }
@@ -129,7 +138,10 @@ private struct BucketColumn: View {
                 }
                 .padding(.horizontal, Spacing.xSmall)
                 .onPreferenceChange(RowFramePreferenceKey.self) { value in
-                    rowFrames.merge(value) { _, new in new }
+                    let merged = rowFrames.merging(value) { _, new in new }
+                    if merged != rowFrames {
+                        rowFrames = merged
+                    }
                 }
             }
         }

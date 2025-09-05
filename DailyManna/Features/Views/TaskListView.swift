@@ -17,11 +17,13 @@ struct TaskListView: View {
     @EnvironmentObject private var authService: AuthenticationService
     @State private var newTaskTitle: String = ""
     @State private var lastSyncText: String = ""
-    #if os(macOS)
     @State private var viewMode: ViewMode = .list
     enum ViewMode: String, CaseIterable, Identifiable { case list = "List", board = "Board"; var id: String { rawValue } }
-    #endif
     @Environment(\.scenePhase) private var scenePhase
+    #if !os(macOS)
+    @Environment(\.horizontalSizeClass) private var hSizeClass
+    @State private var showBoard: Bool = false
+    #endif
     init(viewModel: TaskListViewModel, userId: UUID) {
         _viewModel = StateObject(wrappedValue: viewModel)
         self.userId = userId
@@ -30,6 +32,34 @@ struct TaskListView: View {
     var body: some View {
         NavigationStack {
         VStack(spacing: 16) {
+            if let syncError = viewModel.syncErrorMessage {
+                Banner(kind: .error, message: syncError)
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    .overlay(
+                        HStack {
+                            Spacer()
+                            Button("Retry") { _Concurrency.Task { await viewModel.sync() } }
+                                .buttonStyle(SecondaryButtonStyle(size: .small))
+                        }
+                        .padding(.trailing, 24)
+                    )
+            }
+            if let t = viewModel.pendingDelete {
+                Banner(kind: .warning, message: "\"\(t.title)\" will be moved to trash.")
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    .overlay(
+                        HStack(spacing: 8) {
+                            Spacer()
+                            Button("Cancel") { viewModel.pendingDelete = nil }
+                                .buttonStyle(SecondaryButtonStyle(size: .small))
+                            Button("Delete", role: .destructive) { _Concurrency.Task { await viewModel.performDelete() } }
+                                .buttonStyle(PrimaryButtonStyle(size: .small))
+                        }
+                        .padding(.trailing, 24)
+                    )
+            }
             TopBarView(onNew: { viewModel.presentCreateForm() }, onSyncNow: { _Concurrency.Task { await viewModel.sync() } }, isSyncing: viewModel.isSyncing, userId: userId)
             #if os(macOS)
             if viewMode == .list {
@@ -63,6 +93,9 @@ struct TaskListView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 _Concurrency.Task { await viewModel.sync() }
+                viewModel.startPeriodicSync()
+            } else if phase == .background || phase == .inactive {
+                viewModel.stopPeriodicSync()
             }
         }
         .onAppear {
@@ -90,11 +123,41 @@ struct TaskListView: View {
         }
         #endif
         .sheet(isPresented: $viewModel.isPresentingTaskForm) {
-            let draft = viewModel.editingTask.map(TaskDraft.init(from:)) ?? TaskDraft(userId: userId, bucket: viewModel.selectedBucket)
-            TaskFormView(isEditing: viewModel.editingTask != nil, draft: draft) { draft in
-                _Concurrency.Task { await viewModel.save(draft: draft) }
-            } onCancel: {}
+            if let editing = viewModel.editingTask {
+                let draft = TaskDraft(from: editing)
+                TaskFormView(isEditing: true, draft: draft) { draft in
+                    _Concurrency.Task { await viewModel.save(draft: draft) }
+                } onCancel: {}
+            } else {
+                let draft = TaskDraft(userId: userId, bucket: viewModel.selectedBucket)
+                TaskComposerView(draft: draft) { draft in
+                    _Concurrency.Task { await viewModel.save(draft: draft) }
+                } onCancel: {}
+                .environmentObject(authService)
+            }
         }
+        #if !os(macOS)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if hSizeClass == .regular {
+                    HStack(spacing: 8) {
+                        Button { viewMode = .list } label: { Image(systemName: "list.bullet") }
+                            .buttonStyle(viewMode == .list ? PrimaryButtonStyle(size: .small) : SecondaryButtonStyle(size: .small))
+                        Button { viewMode = .board } label: { Image(systemName: "rectangle.grid.2x2") }
+                            .buttonStyle(viewMode == .board ? PrimaryButtonStyle(size: .small) : SecondaryButtonStyle(size: .small))
+                    }
+                } else {
+                    Menu {
+                        Button(action: { viewMode = .list }) { Label("List", systemImage: "list.bullet"); if viewMode == .list { Image(systemName: "checkmark") } }
+                        Button(action: { viewMode = .board }) { Label("Board", systemImage: "rectangle.grid.2x2"); if viewMode == .board { Image(systemName: "checkmark") } }
+                    } label: {
+                        Image(systemName: viewMode == .list ? "list.bullet" : "rectangle.grid.2x2")
+                    }
+                    .menuStyle(.borderlessButton)
+                }
+            }
+        }
+        #endif
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("dm.open.task"))) { note in
             if let id = note.userInfo?["taskId"] as? UUID {
                 if let bucketStr = note.userInfo?["bucket_key"] as? String, let bucket = TimeBucket(rawValue: bucketStr) {
@@ -107,12 +170,6 @@ struct TaskListView: View {
                     }
                 }
             }
-        }
-        .alert("Delete Task?", isPresented: Binding(get: { viewModel.pendingDelete != nil }, set: { if !$0 { viewModel.pendingDelete = nil } })) {
-            Button("Cancel", role: .cancel) {}
-            Button("Delete", role: .destructive) { _Concurrency.Task { await viewModel.performDelete() } }
-        } message: {
-            if let t = viewModel.pendingDelete { Text("\"\(t.title)\" will be moved to trash.") }
         }
         }
     }
@@ -146,6 +203,7 @@ struct TaskListView: View {
                     onReorder: { taskId, targetIndex in _Concurrency.Task { await viewModel.reorder(taskId: taskId, to: viewModel.selectedBucket, targetIndex: targetIndex) } },
                     onDelete: { task in viewModel.confirmDelete(task) }
                 )
+                .transaction { $0.disablesAnimations = true }
             }
         }
         #else
@@ -169,6 +227,7 @@ struct TaskListView: View {
                 onReorder: { taskId, targetIndex in _Concurrency.Task { await viewModel.reorder(taskId: taskId, to: viewModel.selectedBucket, targetIndex: targetIndex) } },
                 onDelete: { task in viewModel.confirmDelete(task) }
             )
+            .transaction { $0.disablesAnimations = true }
         }
         #endif
     }
@@ -227,6 +286,8 @@ private struct InlineBucketColumn: View {
     @State private var isDragActive: Bool = false
     @State private var insertBeforeId: UUID? = nil
     @State private var showEndIndicator: Bool = false
+    // cached frames snapshot for a drag session to avoid layout churn
+    @State private var dragFrames: [UUID: CGRect] = [:]
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xSmall) {
             BucketHeader(bucket: bucket, count: tasksWithLabels.count)
@@ -274,7 +335,10 @@ private struct InlineBucketColumn: View {
                 .padding(.horizontal, Spacing.xSmall)
                 .transaction { $0.disablesAnimations = true }
                 .onPreferenceChange(RowFramePreferenceKey.self) { value in
-                    rowFrames.merge(value) { _, new in new }
+                    let merged = rowFrames.merging(value) { _, new in new }
+                    if merged != rowFrames {
+                        rowFrames = merged
+                    }
                 }
             }
         }
@@ -287,18 +351,22 @@ private struct InlineBucketColumn: View {
         .onDrop(of: [UTType.plainText], delegate: InlineColumnDropDelegate(
             tasksWithLabels: tasksWithLabels,
             rowFramesProvider: { rowFrames },
+            snapshotFramesProvider: { dragFrames.isEmpty ? rowFrames : dragFrames },
             insertBeforeId: $insertBeforeId,
             showEndIndicator: $showEndIndicator,
             isDragActive: $isDragActive,
-            onDropTask: onDropTask
+            onDropTask: onDropTask,
+            onBegin: { dragFrames = rowFrames },
+            onEnd: { dragFrames = [:] }
         ))
         #else
         .dropDestination(for: DraggableTaskID.self) { items, location in
             guard let item = items.first else { return false }
             let incomplete = tasksWithLabels.filter { !$0.0.isCompleted }
             let orderedIds = incomplete.map { $0.0.id }
+            let frames = dragFrames.isEmpty ? rowFrames : dragFrames
             let sortedRects: [(Int, CGRect)] = orderedIds.enumerated().compactMap { idx, id in
-                if let rect = rowFrames[id] { return (idx, rect) } else { return nil }
+                if let rect = frames[id] { return (idx, rect) } else { return nil }
             }.sorted { $0.1.minY < $1.1.minY }
             var targetIndex = sortedRects.endIndex
             for (idx, rect) in sortedRects {
@@ -310,7 +378,9 @@ private struct InlineBucketColumn: View {
             return true
         } isTargeted: { inside in
             isDragActive = inside
-            if inside == false { insertBeforeId = nil; showEndIndicator = false }
+            if inside {
+                if dragFrames.isEmpty { dragFrames = rowFrames }
+            } else { insertBeforeId = nil; showEndIndicator = false; dragFrames = [:] }
         }
         #endif
     }
@@ -320,18 +390,23 @@ private struct InlineBucketColumn: View {
 private struct InlineColumnDropDelegate: DropDelegate {
     let tasksWithLabels: [(Task, [Label])]
     let rowFramesProvider: () -> [UUID: CGRect]
+    let snapshotFramesProvider: () -> [UUID: CGRect]
     @Binding var insertBeforeId: UUID?
     @Binding var showEndIndicator: Bool
     @Binding var isDragActive: Bool
     let onDropTask: (UUID, Int) -> Void
+    let onBegin: () -> Void
+    let onEnd: () -> Void
 
     func validateDrop(info: DropInfo) -> Bool {
         isDragActive = true
+        onBegin()
         return info.hasItemsConforming(to: [UTType.plainText])
     }
 
     func dropEntered(info: DropInfo) {
         isDragActive = true
+        onBegin()
         updateIndicator(info)
     }
 
@@ -355,7 +430,7 @@ private struct InlineColumnDropDelegate: DropDelegate {
 
     func dropExited(info: DropInfo) { reset() }
 
-    private func reset() { insertBeforeId = nil; showEndIndicator = false; isDragActive = false }
+    private func reset() { insertBeforeId = nil; showEndIndicator = false; isDragActive = false; onEnd() }
 
     private func updateIndicator(_ info: DropInfo) {
         let (targetIndex, orderedIds) = computeTargetIndex(for: info.location)
@@ -366,7 +441,9 @@ private struct InlineColumnDropDelegate: DropDelegate {
     private func computeTargetIndex(for location: CGPoint) -> (Int, [UUID]) {
         let incomplete = tasksWithLabels.filter { !$0.0.isCompleted }
         let orderedIds = incomplete.map { $0.0.id }
-        let frames = rowFramesProvider()
+        let liveFrames = rowFramesProvider()
+        let snap = snapshotFramesProvider()
+        let frames = snap.isEmpty ? liveFrames : snap
         let sortedRects: [(Int, CGRect)] = orderedIds.enumerated().compactMap { idx, id in
             if let rect = frames[id] { return (idx, rect) } else { return nil }
         }.sorted { $0.1.minY < $1.1.minY }
@@ -736,10 +813,13 @@ private struct Deprecated_TasksListView: View { // kept temporarily if reference
         .onDrop(of: [UTType.plainText], delegate: InlineColumnDropDelegate(
             tasksWithLabels: tasksWithLabels,
             rowFramesProvider: { rowFrames },
+            snapshotFramesProvider: { rowFrames },
             insertBeforeId: $insertBeforeId,
             showEndIndicator: $showEndIndicator,
             isDragActive: $isDragActive,
-            onDropTask: { taskId, targetIndex in onReorder(taskId, targetIndex) }
+            onDropTask: { taskId, targetIndex in onReorder(taskId, targetIndex) },
+            onBegin: {},
+            onEnd: {}
         ))
         #else
         .dropDestination(for: DraggableTaskID.self) { items, location in
@@ -786,12 +866,18 @@ private struct TaskRowView: View {
         TaskCard(task: task, labels: labels, onToggleCompletion: { onToggle(task) }, subtaskProgress: subtaskProgress, showsRecursIcon: viewModel.tasksWithRecurrence.contains(task.id), onPauseResume: { _Concurrency.Task { await viewModel.pauseResume(taskId: task.id) } }, onSkipNext: { _Concurrency.Task { await viewModel.skipNext(taskId: task.id) } }, onGenerateNow: { _Concurrency.Task { await viewModel.generateNow(taskId: task.id) } })
             .contextMenu {
                 Button("Edit") { onEdit(task) }
+                    #if os(macOS)
+                    .keyboardShortcut(.return)
+                    #endif
                 Menu("Move to") {
                     ForEach(TimeBucket.allCases.sorted { $0.sortOrder < $1.sortOrder }) { bucket in
                         Button(bucket.displayName) { onMove(task.id, bucket) }
                     }
                 }
                 Button(role: .destructive) { onDelete(task) } label: { Text("Delete") }
+                    #if os(macOS)
+                    .keyboardShortcut(.delete, modifiers: [])
+                    #endif
             }
             .accessibilityActions {
                 Button(task.isCompleted ? "Mark incomplete" : "Mark complete") { onToggle(task) }
@@ -802,6 +888,28 @@ private struct TaskRowView: View {
                 Button(role: .destructive) { onDelete(task) } label: { SwiftUI.Label("Delete", systemImage: "trash") }
                 Button { onEdit(task) } label: { SwiftUI.Label("Edit", systemImage: "pencil") }
             }
+            #endif
+            #if os(macOS)
+            // Hidden keyboard shortcuts for quick actions
+            .overlay(
+                HStack(spacing: 0) {
+                    Button("") { onEdit(task) }
+                        .keyboardShortcut(.return)
+                        .buttonStyle(.plain)
+                        .frame(width: 0, height: 0)
+                        .opacity(0.0)
+                    Button("") { onDelete(task) }
+                        .keyboardShortcut(.delete, modifiers: [])
+                        .buttonStyle(.plain)
+                        .frame(width: 0, height: 0)
+                        .opacity(0.0)
+                    Button("") { onToggle(task) }
+                        .keyboardShortcut(.space, modifiers: [])
+                        .buttonStyle(.plain)
+                        .frame(width: 0, height: 0)
+                        .opacity(0.0)
+                }
+            )
             #endif
     }
 }

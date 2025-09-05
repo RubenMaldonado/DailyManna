@@ -10,6 +10,8 @@ import Foundation
 protocol RemoteTasksRepository {
     func createTask(_ task: Task) async throws -> Task
     func fetchTasks(since lastSync: Date?) async throws -> [Task]
+    /// Context-aware delta fetch trimmed by optional bucket and due date cutoff
+    func fetchTasks(since lastSync: Date?, bucketKey: String?, dueBy: Date?) async throws -> [Task]
     func updateTask(_ task: Task) async throws -> Task
     func deleteTask(id: UUID) async throws
     func fetchTasksForBucket(_ bucketKey: String) async throws -> [Task]

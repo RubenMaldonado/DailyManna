@@ -9,7 +9,7 @@ struct TasksListRowView: View {
     let onMove: (UUID, TimeBucket) -> Void
     let onDelete: (Task) -> Void
     var body: some View {
-        TaskCard(task: task, labels: labels, onToggleCompletion: { onToggle(task) }, subtaskProgress: subtaskProgress)
+        TaskCard(task: task, labels: labels, layout: .list, onToggleCompletion: { onToggle(task) }, subtaskProgress: subtaskProgress)
             .contextMenu {
                 Button("Edit") { onEdit(task) }
                 Menu("Move to") {

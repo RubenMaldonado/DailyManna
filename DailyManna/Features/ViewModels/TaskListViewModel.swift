@@ -24,6 +24,7 @@ final class TaskListViewModel: ObservableObject {
     @Published var editingTask: Task? = nil
     @Published var pendingDelete: Task? = nil
     @Published var isBoardModeActive: Bool = false
+    @Published var syncErrorMessage: String? = nil
     @AppStorage("sortByDueDate") private var sortByDueDate: Bool = false
     // Filtering
     @Published var activeFilterLabelIds: Set<UUID> = []
@@ -43,6 +44,11 @@ final class TaskListViewModel: ObservableObject {
     private var pendingLabelSelections: [UUID: Set<UUID>] = [:]
     private var cancellables: Set<AnyCancellable> = []
     private var pendingRecurrenceSelections: [UUID: RecurrenceRule] = [:]
+    private var availableCutoffCache: (dayKey: String, cutoff: Date)? = nil
+    // Caches
+    private var recurringTemplateIdsCache: Set<UUID> = []
+    private var recurrenceCacheDirty: Bool = true
+    private var labelIdSetByTaskId: [UUID: Set<UUID>] = [:]
     
     init(taskUseCases: TaskUseCases, labelUseCases: LabelUseCases, userId: UUID, syncService: SyncService? = nil, recurrenceUseCases: RecurrenceUseCases? = nil) {
         self.taskUseCases = taskUseCases
@@ -83,6 +89,13 @@ final class TaskListViewModel: ObservableObject {
                     self?.isSyncing = value
                 }
                 .store(in: &cancellables)
+            // Observe sync error for lightweight banner
+            syncService.$syncError
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] error in
+                    self?.syncErrorMessage = error?.localizedDescription
+                }
+                .store(in: &cancellables)
             // Refresh lists whenever a sync cycle finishes successfully
             syncService.$lastSyncDate
                 .removeDuplicates()
@@ -90,17 +103,26 @@ final class TaskListViewModel: ObservableObject {
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] _ in
                     guard let self else { return }
+                    // Auto-hide sync error on success
+                    self.syncErrorMessage = nil
+                    // Mark recurrence cache dirty so we refresh flags lazily on next fetch
+                    self.recurrenceCacheDirty = true
                     _Concurrency.Task {
                         await self.refreshCounts()
-                        await self.fetchTasks(in: self.isBoardModeActive ? nil : self.selectedBucket)
+                        await self.fetchTasks(in: self.isBoardModeActive ? nil : self.selectedBucket, showLoading: false)
                     }
                 }
                 .store(in: &cancellables)
         }
     }
     
-    func fetchTasks(in bucket: TimeBucket? = nil) async {
-        isLoading = true
+    func fetchTasks(in bucket: TimeBucket? = nil, showLoading: Bool = true) async {
+        // Keep sync view context aligned with current UI
+        let effectiveBucket: TimeBucket? = isBoardModeActive ? nil : (bucket ?? selectedBucket)
+        let bucketKey = effectiveBucket?.rawValue
+        let dueBy = availableOnly ? availableCutoffEndOfToday() : nil
+        syncService?.setViewContext(bucketKey: bucketKey, dueBy: dueBy)
+        if showLoading { isLoading = true }
         errorMessage = nil
         do {
             var pairs = try await Logger.shared.time("fetchTasksWithLabels", category: .perf) {
@@ -124,9 +146,7 @@ final class TaskListViewModel: ObservableObject {
             }
             // Apply built-in "Available" filter first (session-only)
             if availableOnly {
-                let calendar = Calendar.current
-                let now = Date()
-                let endOfToday = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: now) ?? now
+                let endOfToday = availableCutoffEndOfToday()
                 pairs = await Logger.shared.time("filterAvailable", category: .perf) {
                     let filtered = pairs.filter { pair in
                         let t = pair.0
@@ -142,15 +162,32 @@ final class TaskListViewModel: ObservableObject {
                 pairs = await Logger.shared.time("filterUnlabeled", category: .perf) { pairs.filter { $0.1.isEmpty } }
             } else if activeFilterLabelIds.isEmpty == false {
                 let target = activeFilterLabelIds
+                // Prebuild label id sets once per fetch to avoid per-row allocations
+                let idSetsByTask: [UUID: Set<UUID>] = Dictionary(uniqueKeysWithValues: pairs.map { ($0.0.id, Set($0.1.map { $0.id })) })
                 pairs = await Logger.shared.time("filterByLabels", category: .perf) {
                     pairs.filter { pair in
-                        let ids = Set(pair.1.map { $0.id })
+                        let ids = idSetsByTask[pair.0.id] ?? []
                         return matchAll ? ids.isSuperset(of: target) : ids.intersection(target).isEmpty == false
                     }
                 }
+                // Persist memoized sets for visible rows
+                self.labelIdSetByTaskId = idSetsByTask
             }
             // Apply label filtering if any active
-            self.tasksWithLabels = pairs
+            // Memoize visible label sets when no label filter is active as well
+            if activeFilterLabelIds.isEmpty {
+                self.labelIdSetByTaskId = Dictionary(uniqueKeysWithValues: pairs.map { ($0.0.id, Set($0.1.map { $0.id })) })
+            }
+            // DEBUG batch telemetry: tasks and distinct labels per render batch
+            #if DEBUG
+            let distinctLabelCount: Int = {
+                var set: Set<UUID> = []
+                for (_, labels) in pairs { labels.forEach { set.insert($0.id) } }
+                return set.count
+            }()
+            Logger.shared.debug("renderBatch tasks=\(pairs.count) distinctLabels=\(distinctLabelCount)", category: .perf)
+            #endif
+            await applyTasksListBatched(pairs)
             await loadRecurrenceFlags(for: pairs.map { $0.0.id })
             // Load subtask progress for visible items incrementally
             let parentIds = pairs.map { $0.0.id }
@@ -159,14 +196,39 @@ final class TaskListViewModel: ObservableObject {
             errorMessage = "Failed to fetch tasks: \(error.localizedDescription)"
             Logger.shared.error("Failed to fetch tasks", category: .ui, error: error)
         }
-        isLoading = false
+        if showLoading { isLoading = false }
+    }
+
+    /// Batch-apply large list diffs to reduce a single massive diff cost in SwiftUI.
+    private func applyTasksListBatched(_ pairs: [(Task, [Label])]) async {
+        let threshold = 400
+        let chunkSize = 200
+        guard pairs.count > threshold else {
+            self.tasksWithLabels = pairs
+            return
+        }
+        // Stage in chunks to avoid heavy single diff
+        self.tasksWithLabels = []
+        var index = 0
+        while index < pairs.count {
+            let end = min(index + chunkSize, pairs.count)
+            let slice = pairs[index..<end]
+            self.tasksWithLabels.append(contentsOf: slice)
+            index = end
+            // Yield to the runloop to allow UI to breathe between chunks
+            try? await _Concurrency.Task.sleep(nanoseconds: 3_000_000) // 3ms
+        }
     }
 
     private func loadRecurrenceFlags(for taskIds: [UUID]) async {
         guard let recUC = recurrenceUseCases else { return }
         do {
-            let recs = try await recUC.list(for: userId)
-            let ids = Set(recs.map { $0.taskTemplateId })
+            if recurrenceCacheDirty {
+                let recs = try await recUC.list(for: userId)
+                recurringTemplateIdsCache = Set(recs.map { $0.taskTemplateId })
+                recurrenceCacheDirty = false
+            }
+            let ids = recurringTemplateIdsCache
             await MainActor.run { self.tasksWithRecurrence = ids.intersection(taskIds) }
         } catch {
             // non-fatal
@@ -174,29 +236,25 @@ final class TaskListViewModel: ObservableObject {
     }
 
     func applyLabelFilter(selected: Set<UUID>, matchAll: Bool) {
+        guard self.activeFilterLabelIds != selected || self.matchAll != matchAll else { return }
         self.activeFilterLabelIds = selected
         self.matchAll = matchAll
         self.unlabeledOnly = false
         persistFilterIds()
-        _Concurrency.Task {
-            await fetchTasks(in: isBoardModeActive ? nil : selectedBucket)
-        }
+        _Concurrency.Task { await self.fetchTasks(in: self.isBoardModeActive ? nil : self.selectedBucket) }
     }
 
     func applyUnlabeledFilter() {
         self.activeFilterLabelIds.removeAll()
         self.matchAll = false
         self.unlabeledOnly = true
-        _Concurrency.Task {
-            await fetchTasks(in: isBoardModeActive ? nil : selectedBucket)
-        }
+        _Concurrency.Task { await self.fetchTasks(in: self.isBoardModeActive ? nil : self.selectedBucket) }
     }
 
     func setAvailableFilter(_ enabled: Bool) {
+        guard self.availableOnly != enabled else { return }
         self.availableOnly = enabled
-        _Concurrency.Task {
-            await fetchTasks(in: isBoardModeActive ? nil : selectedBucket)
-        }
+        _Concurrency.Task { await self.fetchTasks(in: self.isBoardModeActive ? nil : self.selectedBucket) }
     }
 
     private func loadSubtaskProgressIncremental(for parentIds: [UUID]) async {
@@ -223,7 +281,7 @@ final class TaskListViewModel: ObservableObject {
         matchAll = false
         unlabeledOnly = false
         availableOnly = false
-        _Concurrency.Task { await fetchTasks(in: isBoardModeActive ? nil : selectedBucket) }
+        _Concurrency.Task { await self.fetchTasks(in: self.isBoardModeActive ? nil : self.selectedBucket) }
         persistFilterIds()
     }
 
@@ -231,10 +289,26 @@ final class TaskListViewModel: ObservableObject {
         selectedBucket = bucket
         _Concurrency.Task { [weak self] in
             guard let self else { return }
+            // Update context bucket
+            let dueBy = self.availableOnly ? self.availableCutoffEndOfToday() : nil
+            syncService?.setViewContext(bucketKey: bucket.rawValue, dueBy: dueBy)
             async let fetch: Void = self.fetchTasks(in: bucket)
             async let counts: Void = self.refreshCounts()
             _ = await (fetch, counts)
         }
+    }
+
+    private func availableCutoffEndOfToday() -> Date {
+        let calendar = Calendar.current
+        let now = Date()
+        let comps = calendar.dateComponents([.year, .month, .day], from: now)
+        let dayKey = "\(comps.year ?? 0)-\(comps.month ?? 0)-\(comps.day ?? 0)"
+        if let cached = availableCutoffCache, cached.dayKey == dayKey {
+            return cached.cutoff
+        }
+        let cutoff = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: now) ?? now
+        availableCutoffCache = (dayKey, cutoff)
+        return cutoff
     }
 
     private func persistFilterIds() {
@@ -244,17 +318,19 @@ final class TaskListViewModel: ObservableObject {
     }
 
     func refreshCounts() async {
-        // Simple throttle: if another refresh finished within 300ms, skip
+        // Throttle to at most 2/sec under churn
         let now = Date().timeIntervalSince1970
         let last = UserDefaults.standard.double(forKey: Self.countsThrottleKey)
-        if now - last < 0.3 { return }
+        if now - last < 0.5 { return }
         UserDefaults.standard.set(now, forKey: Self.countsThrottleKey)
 
         var counts: [TimeBucket: Int] = [:]
         await withTaskGroup(of: (TimeBucket, Int).self) { group in
             for bucket in TimeBucket.allCases.sorted(by: { $0.sortOrder < $1.sortOrder }) {
                 group.addTask { [userId, taskUseCases, showCompleted] in
-                    let count = (try? await taskUseCases.countTasks(for: userId, in: bucket, includeCompleted: showCompleted)) ?? 0
+                    let count = (try? await Logger.shared.time("count_\(bucket.rawValue)", category: .perf) {
+                        try await taskUseCases.countTasks(for: userId, in: bucket, includeCompleted: showCompleted)
+                    }) ?? 0
                     return (bucket, count)
                 }
             }
@@ -275,12 +351,16 @@ final class TaskListViewModel: ObservableObject {
         do {
             let wasCompleted = task.isCompleted
             if let progress = subtaskProgressByParent[task.id], progress.total > 0 {
-                try await taskUseCases.toggleParentCompletionCascade(parentId: task.id)
+                _ = try await Logger.shared.time("toggleParentCompletionCascade", category: .perf) {
+                    try await taskUseCases.toggleParentCompletionCascade(parentId: task.id)
+                }
             } else {
-                try await taskUseCases.toggleTaskCompletion(id: task.id, userId: userId)
+                _ = try await Logger.shared.time("toggleTaskCompletion", category: .perf) {
+                    try await taskUseCases.toggleTaskCompletion(id: task.id, userId: userId)
+                }
             }
             await refreshCounts()
-            await fetchTasks(in: filter)
+            await fetchTasks(in: filter, showLoading: false)
             // If this task just became completed and has a recurrence, generate the next instance
             if wasCompleted == false {
                 await generateNextInstanceIfRecurring(templateTaskId: task.id)
@@ -398,13 +478,17 @@ final class TaskListViewModel: ObservableObject {
                 }
                 // Persist label selections if available
                 if let desired = pendingLabelSelections[updated.id] {
-                    try await taskUseCases.setLabels(for: updated.id, to: desired, userId: userId)
+                    _ = try await Logger.shared.time("applyLabelSet", category: .perf) {
+                        try await taskUseCases.setLabels(for: updated.id, to: desired, userId: userId)
+                    }
                     pendingLabelSelections.removeValue(forKey: updated.id)
                 }
                 // Apply recurrence if selected
                 if let rule = pendingRecurrenceSelections[updated.id], let recUC = recurrenceUseCases {
                     let recurrence = Recurrence(userId: userId, taskTemplateId: updated.id, rule: rule)
-                    try? await recUC.create(recurrence)
+                    _ = try? await Logger.shared.time("recurrenceCreate", category: .perf) {
+                        try await recUC.create(recurrence)
+                    }
                     pendingRecurrenceSelections.removeValue(forKey: updated.id)
                 }
             } else {
@@ -415,12 +499,16 @@ final class TaskListViewModel: ObservableObject {
                 }
                 // For new tasks, selections were posted keyed by draft.id before creation.
                 if let desired = pendingLabelSelections[draft.id] {
-                    try await taskUseCases.setLabels(for: newTask.id, to: desired, userId: userId)
+                    _ = try await Logger.shared.time("applyLabelSet", category: .perf) {
+                        try await taskUseCases.setLabels(for: newTask.id, to: desired, userId: userId)
+                    }
                     pendingLabelSelections.removeValue(forKey: draft.id)
                 }
                 if let rule = pendingRecurrenceSelections[draft.id], let recUC = recurrenceUseCases {
                     let recurrence = Recurrence(userId: userId, taskTemplateId: newTask.id, rule: rule)
-                    try? await recUC.create(recurrence)
+                    _ = try? await Logger.shared.time("recurrenceCreate", category: .perf) {
+                        try await recUC.create(recurrence)
+                    }
                     pendingRecurrenceSelections.removeValue(forKey: draft.id)
                 }
             }
@@ -466,7 +554,9 @@ final class TaskListViewModel: ObservableObject {
     /// Move task and refresh using a specific filter. Pass `nil` to refresh all buckets (board view).
     func move(taskId: UUID, to bucket: TimeBucket, refreshIn filter: TimeBucket?) async {
         do {
-            try await taskUseCases.moveTask(id: taskId, to: bucket, for: userId)
+            _ = try await Logger.shared.time("reorderCommit_move", category: .perf) {
+                try await taskUseCases.moveTask(id: taskId, to: bucket, for: userId)
+            }
             await refreshCounts()
             await fetchTasks(in: filter)
         } catch {
@@ -480,7 +570,7 @@ final class TaskListViewModel: ObservableObject {
         do {
             try await taskUseCases.createTask(newTask)
             await refreshCounts()
-            await fetchTasks(in: isBoardModeActive ? nil : selectedBucket)
+            await fetchTasks(in: isBoardModeActive ? nil : selectedBucket, showLoading: false)
         } catch {
             errorMessage = "Failed to add task: \(error.localizedDescription)"
             Logger.shared.error("Failed to add task", category: .ui, error: error)
@@ -571,7 +661,9 @@ final class TaskListViewModel: ObservableObject {
 
         // Persist remotely
         do {
-            try await taskUseCases.updateTaskOrderAndBucket(id: taskId, to: bucket, position: newPos, userId: userId)
+            _ = try await Logger.shared.time("reorderCommit", category: .perf) {
+                try await taskUseCases.updateTaskOrderAndBucket(id: taskId, to: bucket, position: newPos, userId: userId)
+            }
         } catch {
             errorMessage = "Failed to reorder: \(error.localizedDescription)"
             Logger.shared.error("Failed to reorder task", category: .ui, error: error)
@@ -592,6 +684,10 @@ final class TaskListViewModel: ObservableObject {
     
     func startPeriodicSync() {
         syncService?.startPeriodicSync(for: userId)
+    }
+    
+    func stopPeriodicSync() {
+        syncService?.stopPeriodicSync()
     }
     
     func initialSyncIfNeeded() async {

@@ -22,6 +22,19 @@ final class SyncService: ObservableObject {
     private var realtimeObserver: NSObjectProtocol?
     private var realtimeDebounceScheduled = false
     private var currentUserId: UUID?
+    #if DEBUG
+    // DEBUG counters for telemetry
+    @Published private(set) var debugRealtimeHintsReceived: Int = 0
+    @Published private(set) var debugDroppedRealtimeHints: Int = 0
+    @Published private(set) var debugOverlappingSyncAttempts: Int = 0
+    #endif
+
+    // Current view context for trimming remote pulls
+    struct ViewContext {
+        var bucketKey: String?
+        var dueBy: Date?
+    }
+    private var currentViewContext: ViewContext = .init(bucketKey: nil, dueBy: nil)
     
     init(
         localTasksRepository: TasksRepository,
@@ -36,6 +49,11 @@ final class SyncService: ObservableObject {
         self.remoteLabelsRepository = remoteLabelsRepository
         self.syncStateStore = syncStateStore
     }
+
+    /// Updates the current view context used to trim remote deltas during sync
+    func setViewContext(bucketKey: String?, dueBy: Date?) {
+        currentViewContext = .init(bucketKey: bucketKey, dueBy: dueBy)
+    }
     
     private var periodicCancellable: AnyCancellable?
     
@@ -46,6 +64,9 @@ final class SyncService: ObservableObject {
         if isSyncing {
             Flags.rerunRequested = true
             Logger.shared.info("Sync already in progress, queueing rerun", category: .sync)
+            #if DEBUG
+            debugOverlappingSyncAttempts += 1
+            #endif
             return
         }
         
@@ -58,23 +79,31 @@ final class SyncService: ObservableObject {
             // Sync tasks
             try await withRetry { [weak self] in
                 guard let self else { return }
-                try await self.syncTasks(userId: userId)
+                _ = try await Logger.shared.time("syncTasks") {
+                    try await self.syncTasks(userId: userId)
+                }
             }
             
             // Sync labels
             try await withRetry { [weak self] in
                 guard let self else { return }
-                try await self.syncLabels(userId: userId)
+                _ = try await Logger.shared.time("syncLabels") {
+                    try await self.syncLabels(userId: userId)
+                }
             }
 
             // Recurrences (pull + catch-up)
             try await withRetry { [weak self] in
                 guard let self else { return }
-                try await self.syncRecurrences(userId: userId)
+                _ = try await Logger.shared.time("syncRecurrences") {
+                    try await self.syncRecurrences(userId: userId)
+                }
             }
             try await withRetry { [weak self] in
                 guard let self else { return }
-                await self.catchUpRecurrencesIfNeeded(userId: userId)
+                _ = await Logger.shared.time("recurrenceCatchUp") {
+                    await self.catchUpRecurrencesIfNeeded(userId: userId)
+                }
             }
             
             lastSyncDate = Date()
@@ -120,10 +149,17 @@ final class SyncService: ObservableObject {
         // Add small overlap to heal clock skew or missed events
         let sinceBase = checkpoints?.lastTasksSyncAt ?? lastSyncDate
         let since = isColdStart ? nil : sinceBase?.addingTimeInterval(-120)
-        var remoteTasks = try await remoteTasksRepository.fetchTasks(since: since)
+        let bucketKey = currentViewContext.bucketKey
+        let dueBy = currentViewContext.dueBy
+        var remoteTasks: [Task]
+        if bucketKey != nil || dueBy != nil {
+            remoteTasks = try await remoteTasksRepository.fetchTasks(since: since, bucketKey: bucketKey, dueBy: dueBy)
+        } else {
+            remoteTasks = try await remoteTasksRepository.fetchTasks(since: since)
+        }
         // Fallback: if we expected deltas but got nothing on an empty store, fetch all
         if remoteTasks.isEmpty && isColdStart && since != nil {
-            remoteTasks = try await remoteTasksRepository.fetchTasks(since: nil)
+            remoteTasks = try await remoteTasksRepository.fetchTasks(since: nil, bucketKey: bucketKey, dueBy: dueBy)
         }
         
         if !remoteTasks.isEmpty {
@@ -135,6 +171,10 @@ final class SyncService: ObservableObject {
                     if let existingTask = try await localTasksRepository.fetchTask(by: remoteTask.id) {
                         // Apply conflict resolution (last-write-wins for now)
                         if remoteTask.updatedAt > existingTask.updatedAt {
+                            // Fast no-op skip: if equal after dropping volatile fields, skip write
+                            if fastEqual(existingTask, remoteTask) {
+                                continue
+                            }
                             var taskToUpdate = remoteTask
                             taskToUpdate.needsSync = false
                             try await localTasksRepository.updateTask(taskToUpdate)
@@ -276,6 +316,16 @@ final class SyncService: ObservableObject {
                         await NotificationsManager.scheduleDueNotification(taskId: newTask.id, title: newTask.title, dueAt: due, bucketKey: newTask.bucketKey.rawValue)
                     }
                     Logger.shared.info("Catch-up: generated instance for recurrence template=\(rec.taskTemplateId) at=\(next)", category: .sync)
+                    // Advance recurrence so we don't re-generate in the same or next cycles
+                    var updatedRec = rec
+                    updatedRec.lastGeneratedAt = Date()
+                    if let upcoming = recUC.nextOccurrence(from: next, rule: rec.rule) {
+                        updatedRec.nextScheduledAt = upcoming
+                    } else {
+                        // If rule does not produce a next date, pause
+                        updatedRec.status = "paused"
+                    }
+                    try? await recUC.update(updatedRec)
                 }
             }
         } catch {
@@ -305,6 +355,12 @@ final class SyncService: ObservableObject {
             }
     }
 
+    /// Stops periodic sync timer
+    func stopPeriodicSync() {
+        periodicCancellable?.cancel()
+        periodicCancellable = nil
+    }
+
     // MARK: - Realtime hint handling
     private func startRealtimeHints(for userId: UUID) {
         // Debounced sync on change notifications emitted by remote repositories
@@ -313,7 +369,15 @@ final class SyncService: ObservableObject {
             _Concurrency.Task { @MainActor [weak self] in
                 guard let self else { return }
                 guard self.currentUserId == userId else { return }
-                if self.realtimeDebounceScheduled { return }
+                #if DEBUG
+                self.debugRealtimeHintsReceived += 1
+                #endif
+                if self.realtimeDebounceScheduled {
+                    #if DEBUG
+                    self.debugDroppedRealtimeHints += 1
+                    #endif
+                    return
+                }
                 self.realtimeDebounceScheduled = true
                 try? await _Concurrency.Task.sleep(nanoseconds: 500_000_000) // 0.5s debounce
                 self.realtimeDebounceScheduled = false
@@ -348,4 +412,15 @@ final class SyncService: ObservableObject {
         }
         throw lastError ?? NSError(domain: "Sync", code: -1)
     }
+}
+
+// MARK: - Fast compare helpers
+private func fastEqual(_ lhs: Task, _ rhs: Task) -> Bool {
+    return lhs.title == rhs.title &&
+    lhs.description == rhs.description &&
+    lhs.bucketKey == rhs.bucketKey &&
+    lhs.position == rhs.position &&
+    lhs.isCompleted == rhs.isCompleted &&
+    lhs.dueAt == rhs.dueAt &&
+    lhs.deletedAt == rhs.deletedAt
 }
