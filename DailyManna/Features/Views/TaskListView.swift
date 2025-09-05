@@ -77,8 +77,8 @@ struct TaskListView: View {
                 isSyncing: viewModel.isSyncing,
                 userId: userId,
                 selectedBucket: viewModel.selectedBucket,
-                onSelectBucket: { bucket in viewModel.select(bucket: bucket) },
-                onOpenFilter: { showFilterSheet = true },
+                onSelectBucket: { bucket in Logger.shared.info("Toolbar select bucket=\(bucket.rawValue)", category: .ui); viewModel.select(bucket: bucket) },
+                onOpenFilter: { Logger.shared.info("Open filter sheet", category: .ui); showFilterSheet = true },
                 activeFilterCount: activeFilterCount
             )
             // bucket picker moved to toolbar menu
