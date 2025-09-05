@@ -192,8 +192,10 @@ struct TaskListView: View {
                     HStack(spacing: 8) {
                         Button { viewMode = .list } label: { Image(systemName: "list.bullet") }
                             .buttonStyle(viewMode == .list ? PrimaryButtonStyle(size: .small) : SecondaryButtonStyle(size: .small))
+                            .keyboardShortcut("1", modifiers: .command)
                         Button { viewMode = .board } label: { Image(systemName: "rectangle.grid.2x2") }
                             .buttonStyle(viewMode == .board ? PrimaryButtonStyle(size: .small) : SecondaryButtonStyle(size: .small))
+                            .keyboardShortcut("2", modifiers: .command)
                     }
                 } else {
                     Menu {
@@ -570,11 +572,11 @@ private struct TopBarView: View {
             Button(action: onOpenFilter) {
                 HStack(spacing: 6) {
                     Image(systemName: "line.3.horizontal.decrease.circle")
-                    if activeFilterCount > 0 { Text("\(activeFilterCount)") }
+                    if activeFilterCount > 0 { CountBadge(count: activeFilterCount) }
                 }
             }
             .buttonStyle(SecondaryButtonStyle(size: .small))
-            Button(action: onSyncNow) { SwiftUI.Label("Sync", systemImage: "arrow.clockwise") }
+            Button(action: onSyncNow) { Image(systemName: "arrow.clockwise") }
                 .buttonStyle(SecondaryButtonStyle(size: .small))
             Button(action: onNew) { SwiftUI.Label("New", systemImage: "plus") }
                 .buttonStyle(PrimaryButtonStyle(size: .small))
