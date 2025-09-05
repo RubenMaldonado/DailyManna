@@ -15,8 +15,11 @@ struct TaskListView: View {
     @StateObject private var viewModel: TaskListViewModel
     private let userId: UUID
     @EnvironmentObject private var authService: AuthenticationService
-    @State private var newTaskTitle: String = ""
     @State private var lastSyncText: String = ""
+    // Filter / sheet state
+    @State private var showFilterSheet: Bool = false
+    @State private var allLabels: [Label] = []
+    @State private var savedFilters: [SavedFilter] = []
     @State private var viewMode: ViewMode = .list
     enum ViewMode: String, CaseIterable, Identifiable { case list = "List", board = "Board"; var id: String { rawValue } }
     @Environment(\.scenePhase) private var scenePhase
@@ -29,6 +32,14 @@ struct TaskListView: View {
         self.userId = userId
     }
     
+    // MARK: - Derived state
+    private var hasActiveFilters: Bool {
+        viewModel.availableOnly || viewModel.unlabeledOnly || viewModel.activeFilterLabelIds.isEmpty == false
+    }
+    private var activeFilterCount: Int {
+        (viewModel.availableOnly ? 1 : 0) + (viewModel.unlabeledOnly ? 1 : 0) + viewModel.activeFilterLabelIds.count
+    }
+
     var body: some View {
         NavigationStack {
         VStack(spacing: 16) {
@@ -60,26 +71,33 @@ struct TaskListView: View {
                         .padding(.trailing, 24)
                     )
             }
-            TopBarView(onNew: { viewModel.presentCreateForm() }, onSyncNow: { _Concurrency.Task { await viewModel.sync() } }, isSyncing: viewModel.isSyncing, userId: userId)
-            #if os(macOS)
-            if viewMode == .list {
-                BucketPickerView(selected: $viewModel.selectedBucket) { bucket in
-                    viewModel.select(bucket: bucket)
-                }
-            }
-            ViewModePicker(viewMode: $viewMode)
-            #else
-            BucketPickerView(selected: $viewModel.selectedBucket) { bucket in
-                viewModel.select(bucket: bucket)
-            }
-            #endif
+            TopBarView(
+                onNew: { viewModel.presentCreateForm() },
+                onSyncNow: { _Concurrency.Task { await viewModel.sync() } },
+                isSyncing: viewModel.isSyncing,
+                userId: userId,
+                selectedBucket: viewModel.selectedBucket,
+                onSelectBucket: { bucket in viewModel.select(bucket: bucket) },
+                onOpenFilter: { showFilterSheet = true },
+                activeFilterCount: activeFilterCount
+            )
+            // bucket picker moved to toolbar menu
             // Debug settings moved under gear in top bar
             BucketHeader(bucket: viewModel.selectedBucket,
                          count: viewModel.bucketCounts[viewModel.selectedBucket] ?? 0)
             .padding(.horizontal)
-            // New inline filter components
-            InlineFilterSection(userId: userId, viewModel: viewModel)
-            QuickAddComposer(newTaskTitle: $newTaskTitle, onAdd: addCurrentTask)
+            // Active filter chips row (shown only when there are active filters)
+            if hasActiveFilters {
+                ActiveFiltersChips(
+                    labels: allLabels,
+                    selectedLabelIds: viewModel.activeFilterLabelIds,
+                    availableOnly: viewModel.availableOnly,
+                    unlabeledOnly: viewModel.unlabeledOnly,
+                    onRemoveLabel: { id in viewModel.activeFilterLabelIds.remove(id); _Concurrency.Task { await viewModel.fetchTasks(in: viewModel.selectedBucket) } },
+                    onClearAll: { viewModel.clearFilters() }
+                )
+                .padding(.horizontal)
+            }
             contentSection
             Spacer(minLength: 0)
         }
@@ -89,6 +107,8 @@ struct TaskListView: View {
             await viewModel.fetchTasks(in: viewModel.selectedBucket)
             await viewModel.initialSyncIfNeeded()
             viewModel.startPeriodicSync()
+            await loadLabels()
+            await loadSaved()
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
@@ -136,6 +156,35 @@ struct TaskListView: View {
                 .environmentObject(authService)
             }
         }
+        .sheet(isPresented: $showFilterSheet) {
+            FilterPickerSheet(
+                userId: userId,
+                selected: $viewModel.activeFilterLabelIds,
+                availableOnly: $viewModel.availableOnly,
+                unlabeledOnly: $viewModel.unlabeledOnly,
+                matchAll: $viewModel.matchAll,
+                savedFilters: savedFilters,
+                onApply: {
+                    showFilterSheet = false
+                    _Concurrency.Task { await viewModel.fetchTasks(in: viewModel.selectedBucket) }
+                },
+                onClear: {
+                    viewModel.clearFilters(); showFilterSheet = false
+                }
+            )
+        }
+        #if os(macOS)
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                Picker("View", selection: $viewMode) {
+                    Image(systemName: "list.bullet").tag(ViewMode.list)
+                    Image(systemName: "rectangle.grid.2x2").tag(ViewMode.board)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 140)
+            }
+        }
+        #endif
         #if !os(macOS)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -461,15 +510,25 @@ private struct RowFramePreferenceKey: PreferenceKey {
     }
 }
 #endif
+private extension TaskListView {}
+
+// MARK: - Data loaders for filters
 private extension TaskListView {
-    func addCurrentTask() {
-        let title = newTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty else { return }
-        _Concurrency.Task {
-            await viewModel.addTask(title: title, description: nil, bucket: viewModel.selectedBucket)
-            await viewModel.refreshCounts()
+    func loadLabels() async {
+        let deps = Dependencies.shared
+        if let useCases: LabelUseCases = try? deps.resolve(type: LabelUseCases.self) {
+            if let uid = authService.currentUser?.id {
+                allLabels = (try? await useCases.fetchLabels(for: uid)) ?? []
+            }
         }
-        newTaskTitle = ""
+    }
+    func loadSaved() async {
+        let deps = Dependencies.shared
+        if let repo: SavedFiltersRepository = try? deps.resolve(type: SavedFiltersRepository.self) {
+            if let uid = authService.currentUser?.id {
+                savedFilters = (try? await repo.list(for: uid)) ?? []
+            }
+        }
     }
 }
 
@@ -480,6 +539,10 @@ private struct TopBarView: View {
     let onSyncNow: () -> Void
     let isSyncing: Bool
     let userId: UUID
+    let selectedBucket: TimeBucket
+    let onSelectBucket: (TimeBucket) -> Void
+    let onOpenFilter: () -> Void
+    let activeFilterCount: Int
     @State private var showSettings = false
     
     var body: some View {
@@ -492,6 +555,25 @@ private struct TopBarView: View {
                 }
             }
             Spacer()
+            // Bucket menu
+            Menu {
+                ForEach(TimeBucket.allCases.sorted { $0.sortOrder < $1.sortOrder }) { bucket in
+                    Button(action: { onSelectBucket(bucket) }) {
+                        HStack { Text(bucket.displayName); if bucket == selectedBucket { Spacer(); Image(systemName: "checkmark") } }
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) { Image(systemName: "tray" ); Text(selectedBucket.displayName) }
+            }
+            .menuStyle(.borderlessButton)
+            // Filter button
+            Button(action: onOpenFilter) {
+                HStack(spacing: 6) {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                    if activeFilterCount > 0 { Text("\(activeFilterCount)") }
+                }
+            }
+            .buttonStyle(SecondaryButtonStyle(size: .small))
             Button(action: onSyncNow) { SwiftUI.Label("Sync", systemImage: "arrow.clockwise") }
                 .buttonStyle(SecondaryButtonStyle(size: .small))
             Button(action: onNew) { SwiftUI.Label("New", systemImage: "plus") }
@@ -640,27 +722,50 @@ private struct InlineFilterSection: View {
 private struct FilterPickerSheet: View {
     let userId: UUID
     @Binding var selected: Set<UUID>
-    let onDone: () -> Void
+    @Binding var availableOnly: Bool
+    @Binding var unlabeledOnly: Bool
+    @Binding var matchAll: Bool
+    let savedFilters: [SavedFilter]
+    let onApply: () -> Void
+    let onClear: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var search: String = ""
     @State private var labels: [Label] = []
     var body: some View {
         NavigationStack {
             List {
-                ForEach(filtered) { label in
-                    HStack {
-                        Image(systemName: selected.contains(label.id) ? "checkmark.circle.fill" : "circle")
-                            .foregroundColor(selected.contains(label.id) ? Colors.primary : Colors.onSurfaceVariant)
-                        Circle().fill(label.uiColor).frame(width: 14, height: 14)
-                        Text(label.name)
+                Section("Built-in") {
+                    Toggle("Available", isOn: $availableOnly)
+                    Toggle("Unlabeled only", isOn: $unlabeledOnly)
+                    Toggle("Match all labels", isOn: $matchAll)
+                }
+                if savedFilters.isEmpty == false {
+                    Section("Presets") {
+                        ForEach(savedFilters) { filter in
+                            Button(filter.name) {
+                                selected = Set(filter.labelIds)
+                                matchAll = filter.matchAll
+                            }
+                        }
                     }
-                    .contentShape(Rectangle())
-                    .onTapGesture { toggle(label.id) }
+                }
+                Section("Labels") {
+                    ForEach(filtered) { label in
+                        HStack {
+                            Image(systemName: selected.contains(label.id) ? "checkmark.circle.fill" : "circle")
+                                .foregroundColor(selected.contains(label.id) ? Colors.primary : Colors.onSurfaceVariant)
+                            Circle().fill(label.uiColor).frame(width: 14, height: 14)
+                            Text(label.name)
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture { toggle(label.id) }
+                    }
                 }
             }
-            .navigationTitle("Filter by Labels")
+            .navigationTitle("Filters")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { onDone(); dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Clear All") { onClear(); dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Apply") { onApply(); dismiss() } }
             }
             .searchable(text: $search)
             .task { await load() }
@@ -674,6 +779,33 @@ private struct FilterPickerSheet: View {
     }
     private var filtered: [Label] { let q = search.trimmingCharacters(in: .whitespacesAndNewlines); return q.isEmpty ? labels : labels.filter { $0.name.localizedCaseInsensitiveContains(q) } }
     private func toggle(_ id: UUID) { if selected.contains(id) { selected.remove(id) } else { selected.insert(id) } }
+}
+
+private struct ActiveFiltersChips: View {
+    let labels: [Label]
+    let selectedLabelIds: Set<UUID>
+    let availableOnly: Bool
+    let unlabeledOnly: Bool
+    let onRemoveLabel: (UUID) -> Void
+    let onClearAll: () -> Void
+    var body: some View {
+        HStack(spacing: 6) {
+            if availableOnly { Pill(text: "Available", onClear: {}) }
+            if unlabeledOnly { Pill(text: "Unlabeled", onClear: {}) }
+            ForEach(Array(selectedLabelIds), id: \.self) { id in
+                if let label = labels.first(where: { $0.id == id }) {
+                    HStack(spacing: 4) {
+                        LabelChip(label: label)
+                        Button(role: .destructive) { onRemoveLabel(id) } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.plain)
+                    }
+                }
+            }
+            Spacer()
+            Button("Clear") { onClearAll() }
+                .buttonStyle(SecondaryButtonStyle(size: .small))
+        }
+    }
 }
 
 // SyncStatusRow removed; status moved into the top bar
@@ -695,37 +827,10 @@ private struct BucketPickerView: View {
 }
 
 #if os(macOS)
-private struct ViewModePicker: View {
-    @Binding var viewMode: TaskListView.ViewMode
-    var body: some View {
-        Picker("View", selection: $viewMode) {
-            ForEach(TaskListView.ViewMode.allCases) { mode in
-                Text(mode.rawValue).tag(mode)
-            }
-        }
-        .pickerStyle(.segmented)
-        .padding(.horizontal)
-    }
-}
+// Removed standalone in-content ViewModePicker; toolbar picker is used instead.
 #endif
 
-private struct QuickAddComposer: View {
-    @Binding var newTaskTitle: String
-    let onAdd: () -> Void
-    
-    var body: some View {
-        HStack(spacing: 8) {
-            TextField("Add a task…", text: $newTaskTitle)
-                .textFieldStyle(.roundedBorder)
-                .submitLabel(.done)
-                .onSubmit { onAdd() }
-            Button(action: onAdd) { Text("Add") }
-                .buttonStyle(PrimaryButtonStyle())
-                .disabled(newTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        }
-        .padding(.horizontal)
-    }
-}
+// QuickAddComposer removed by request
 
 private struct EmptyStateView: View {
     let bucketName: String
