@@ -77,8 +77,16 @@ struct TaskListView: View {
                 isSyncing: viewModel.isSyncing,
                 userId: userId,
                 selectedBucket: viewModel.selectedBucket,
-                onSelectBucket: { bucket in Logger.shared.info("Toolbar select bucket=\(bucket.rawValue)", category: .ui); viewModel.select(bucket: bucket) },
-                onOpenFilter: { Logger.shared.info("Open filter sheet", category: .ui); showFilterSheet = true },
+                onSelectBucket: { bucket in
+                    Logger.shared.info("Toolbar select bucket=\(bucket.rawValue)", category: .ui)
+                    Telemetry.record(.bucketChange, metadata: ["bucket": bucket.rawValue])
+                    viewModel.select(bucket: bucket)
+                },
+                onOpenFilter: {
+                    Logger.shared.info("Open filter sheet", category: .ui)
+                    Telemetry.record(.filterOpen)
+                    showFilterSheet = true
+                },
                 activeFilterCount: activeFilterCount
             )
             // bucket picker moved to toolbar menu
@@ -123,6 +131,7 @@ struct TaskListView: View {
         }
         .onChange(of: viewMode) { _, newMode in
             Logger.shared.info("View mode changed -> \(newMode.rawValue)", category: .ui)
+            Telemetry.record(.viewSwitch, metadata: ["mode": newMode.rawValue])
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("dm.filter.unlabeled"))) { _ in
             viewModel.applyUnlabeledFilter()
@@ -169,10 +178,12 @@ struct TaskListView: View {
                 savedFilters: savedFilters,
                 onApply: {
                     showFilterSheet = false
+                    Telemetry.record(.filterApply)
                     _Concurrency.Task { await viewModel.fetchTasks(in: viewModel.selectedBucket) }
                 },
                 onClear: {
                     viewModel.clearFilters(); showFilterSheet = false
+                    Telemetry.record(.filterClear)
                 }
             )
         }
