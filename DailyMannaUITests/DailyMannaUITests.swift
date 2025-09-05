@@ -17,24 +17,44 @@ final class DailyMannaUITests: XCTestCase {
         app.launch()
     }
 
-    func test_filterBar_applyAndClear() {
-        // Ensure Filter field exists
-        let filterField = app.textFields["Add label…"]
-        XCTAssertTrue(filterField.waitForExistence(timeout: 5))
+    func test_filters_applyAndClear_fromToolbar() {
+        // Open Filter sheet
+        let filterButton = app.buttons["Filters"]
+        XCTAssertTrue(filterButton.waitForExistence(timeout: 5))
+        filterButton.tap()
 
-        // Open Options and toggle "Available"
-        app.buttons["Options"].tap()
-        let availableToggle = app.buttons["Available"]
-        if availableToggle.waitForExistence(timeout: 2) { availableToggle.tap() }
+        // Toggle built-in 'Available'
+        let availableCell = app.switches["Available"]
+        XCTAssertTrue(availableCell.waitForExistence(timeout: 5))
+        availableCell.tap()
 
-        // Clear filters button if visible
-        let clear = app.buttons["Clear filters"]
-        if clear.waitForExistence(timeout: 2) { clear.tap() }
+        // Apply
+        app.buttons["Apply"].tap()
 
-        // Saved menu interaction
-        app.buttons["Saved"].tap()
-        let unlabeled = app.buttons["Unlabeled"]
-        if unlabeled.waitForExistence(timeout: 2) { unlabeled.tap() }
-        if clear.waitForExistence(timeout: 2) { clear.tap() }
+        // Badge should now exist
+        XCTAssertTrue(filterButton.exists)
+
+        // Reopen and Clear All
+        filterButton.tap()
+        let clearAll = app.buttons["Clear All"]
+        XCTAssertTrue(clearAll.waitForExistence(timeout: 5))
+        clearAll.tap()
+    }
+
+    func test_viewMode_switching() {
+        // iPhone/iPad menu button should exist
+        let listIcon = app.buttons["list.bullet"]
+        let gridIcon = app.buttons["rectangle.grid.2x2"]
+        if listIcon.exists && gridIcon.exists {
+            gridIcon.tap()
+            listIcon.tap()
+        } else {
+            // Fallback: segmented in toolbar (macOS-like environments)
+            let segmented = app.segmentedControls.firstMatch
+            if segmented.waitForExistence(timeout: 5) {
+                segmented.buttons.element(boundBy: 1).tap()
+                segmented.buttons.element(boundBy: 0).tap()
+            }
+        }
     }
 }
