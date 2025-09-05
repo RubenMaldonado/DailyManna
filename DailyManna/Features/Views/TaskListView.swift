@@ -121,6 +121,9 @@ struct TaskListView: View {
         .onAppear {
             _Concurrency.Task { await viewModel.fetchTasks(in: viewModel.selectedBucket) }
         }
+        .onChange(of: viewMode) { _, newMode in
+            Logger.shared.info("View mode changed -> \(newMode.rawValue)", category: .ui)
+        }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("dm.filter.unlabeled"))) { _ in
             viewModel.applyUnlabeledFilter()
         }
@@ -576,6 +579,7 @@ private struct TopBarView: View {
                 }
             }
             .buttonStyle(SecondaryButtonStyle(size: .small))
+            .accessibilityLabel(activeFilterCount > 0 ? "Filters, \(activeFilterCount) active" : "Filters")
             Button(action: onSyncNow) { Image(systemName: "arrow.clockwise") }
                 .buttonStyle(SecondaryButtonStyle(size: .small))
             Button(action: onNew) { SwiftUI.Label("New", systemImage: "plus") }
@@ -596,6 +600,21 @@ private struct TopBarView: View {
                 }
         }
         .padding(.horizontal)
+        .overlay(
+            // Hidden keyboard shortcuts for power users (iOS/iPad/macOS where applicable)
+            HStack(spacing: 0) {
+                Button("") { onOpenFilter() }
+                    .keyboardShortcut("f", modifiers: [.command, .option])
+                    .buttonStyle(.plain)
+                    .frame(width: 0, height: 0)
+                    .opacity(0.0)
+                Button("") { onNew() }
+                    .keyboardShortcut("n", modifiers: .command)
+                    .buttonStyle(.plain)
+                    .frame(width: 0, height: 0)
+                    .opacity(0.0)
+            }
+        )
     }
 }
 
