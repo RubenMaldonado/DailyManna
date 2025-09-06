@@ -640,20 +640,47 @@ private struct FilterPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var search: String = ""
     @State private var labels: [Label] = []
+    // Local working copy to avoid parent updates during layout
+    @State private var localSelected: Set<UUID>
+    @State private var localAvailableOnly: Bool
+    @State private var localUnlabeledOnly: Bool
+    @State private var localMatchAll: Bool
+
+    init(userId: UUID,
+         selected: Binding<Set<UUID>>,
+         availableOnly: Binding<Bool>,
+         unlabeledOnly: Binding<Bool>,
+         matchAll: Binding<Bool>,
+         savedFilters: [SavedFilter],
+         onApply: @escaping () -> Void,
+         onClear: @escaping () -> Void) {
+        self.userId = userId
+        _selected = selected
+        _availableOnly = availableOnly
+        _unlabeledOnly = unlabeledOnly
+        _matchAll = matchAll
+        self.savedFilters = savedFilters
+        self.onApply = onApply
+        self.onClear = onClear
+        _localSelected = State(initialValue: selected.wrappedValue)
+        _localAvailableOnly = State(initialValue: availableOnly.wrappedValue)
+        _localUnlabeledOnly = State(initialValue: unlabeledOnly.wrappedValue)
+        _localMatchAll = State(initialValue: matchAll.wrappedValue)
+    }
     var body: some View {
         NavigationStack {
             List {
                 Section("Built-in") {
-                    Toggle("Available", isOn: $availableOnly)
-                    Toggle("Unlabeled only", isOn: $unlabeledOnly)
-                    Toggle("Match all labels", isOn: $matchAll)
+                    Toggle("Available", isOn: $localAvailableOnly)
+                    Toggle("Unlabeled only", isOn: $localUnlabeledOnly)
+                    Toggle("Match all labels", isOn: $localMatchAll)
                 }
                 if savedFilters.isEmpty == false {
                     Section("Presets") {
                         ForEach(savedFilters) { filter in
                             Button(filter.name) {
-                                selected = Set(filter.labelIds)
-                                matchAll = filter.matchAll
+                                localSelected = Set(filter.labelIds)
+                                localMatchAll = filter.matchAll
                             }
                         }
                     }
@@ -661,8 +688,8 @@ private struct FilterPickerSheet: View {
                 Section("Labels") {
                     ForEach(filtered) { label in
                         HStack {
-                            Image(systemName: selected.contains(label.id) ? "checkmark.circle.fill" : "circle")
-                                .foregroundColor(selected.contains(label.id) ? Colors.primary : Colors.onSurfaceVariant)
+                            Image(systemName: localSelected.contains(label.id) ? "checkmark.circle.fill" : "circle")
+                                .foregroundColor(localSelected.contains(label.id) ? Colors.primary : Colors.onSurfaceVariant)
                             Circle().fill(label.uiColor).frame(width: 14, height: 14)
                             Text(label.name)
                         }
@@ -673,8 +700,23 @@ private struct FilterPickerSheet: View {
             }
             .navigationTitle("Filters")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Clear All") { onClear(); dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Apply") { onApply(); dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Clear All") {
+                        dismiss()
+                        DispatchQueue.main.async { onClear() }
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Apply") {
+                        // Commit local state back to parent, then notify
+                        selected = localSelected
+                        availableOnly = localAvailableOnly
+                        unlabeledOnly = localUnlabeledOnly
+                        matchAll = localMatchAll
+                        dismiss()
+                        DispatchQueue.main.async { onApply() }
+                    }
+                }
             }
             .searchable(text: $search)
             .task { await load() }
@@ -687,7 +729,7 @@ private struct FilterPickerSheet: View {
         }
     }
     private var filtered: [Label] { let q = search.trimmingCharacters(in: .whitespacesAndNewlines); return q.isEmpty ? labels : labels.filter { $0.name.localizedCaseInsensitiveContains(q) } }
-    private func toggle(_ id: UUID) { if selected.contains(id) { selected.remove(id) } else { selected.insert(id) } }
+    private func toggle(_ id: UUID) { if localSelected.contains(id) { localSelected.remove(id) } else { localSelected.insert(id) } }
 }
 
 private struct ActiveFiltersChips: View {
