@@ -73,19 +73,13 @@ struct TaskListView: View {
                         .padding(.trailing, 24)
                     )
             }
-            TopBarView(
+            TaskListHeader(
                 onNew: { viewModel.presentCreateForm() },
                 onSyncNow: { _Concurrency.Task { await viewModel.sync() } },
                 isSyncing: viewModel.isSyncing,
                 userId: userId,
                 selectedBucket: viewModel.selectedBucket,
-                showBucketMenu: {
-                    #if os(macOS)
-                    return viewMode != .board
-                    #else
-                    return viewMode != .board
-                    #endif
-                }(),
+                showBucketMenu: viewMode != .board,
                 onSelectBucket: { bucket in
                     Logger.shared.info("Toolbar select bucket=\(bucket.rawValue)", category: .ui)
                     Telemetry.record(.bucketChange, metadata: ["bucket": bucket.rawValue])
