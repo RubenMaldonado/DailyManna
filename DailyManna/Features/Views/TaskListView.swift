@@ -677,68 +677,73 @@ private struct FilterPickerSheet: View {
     }
     var body: some View {
         NavigationStack {
-            List {
-                Section("Built-in") {
-                    Toggle("Available", isOn: $localAvailableOnly)
-                    Toggle("Unlabeled only", isOn: $localUnlabeledOnly)
-                    Toggle("Match all labels", isOn: $localMatchAll)
-                }
-                if savedFilters.isEmpty == false {
-                    Section("Presets") {
-                        ForEach(savedFilters) { filter in
-                            Button(filter.name) {
-                                localSelected = Set(filter.labelIds)
-                                localMatchAll = filter.matchAll
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    // Built-ins
+                    Text("Built-in").font(.headline)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle("Available", isOn: $localAvailableOnly)
+                        Toggle("Unlabeled only", isOn: $localUnlabeledOnly)
+                        Toggle("Match all labels", isOn: $localMatchAll)
+                    }
+                    .padding(.bottom, 8)
+
+                    // Presets
+                    Text("Presets").font(.headline)
+                    if savedFilters.isEmpty {
+                        Text("No saved filters").foregroundStyle(Colors.onSurfaceVariant)
+                    } else {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(savedFilters) { filter in
+                                Button(filter.name) {
+                                    localSelected = Set(filter.labelIds)
+                                    localMatchAll = filter.matchAll
+                                }
+                                .buttonStyle(.borderless)
                             }
                         }
                     }
-                }
-                Section("Labels") {
-                    ForEach(filtered) { label in
-                        HStack {
-                            Image(systemName: localSelected.contains(label.id) ? "checkmark.circle.fill" : "circle")
-                                .foregroundColor(localSelected.contains(label.id) ? Colors.primary : Colors.onSurfaceVariant)
-                            Circle().fill(label.uiColor).frame(width: 14, height: 14)
-                            Text(label.name)
+                    Button("Save Current…") { showSaveDialog = true }
+                        .buttonStyle(SecondaryButtonStyle(size: .small))
+
+                    // Labels
+                    Text("Labels").font(.headline)
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(filtered) { label in
+                            HStack {
+                                Image(systemName: localSelected.contains(label.id) ? "checkmark.circle.fill" : "circle")
+                                    .foregroundColor(localSelected.contains(label.id) ? Colors.primary : Colors.onSurfaceVariant)
+                                Circle().fill(label.uiColor).frame(width: 14, height: 14)
+                                Text(label.name)
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture { toggle(label.id) }
                         }
-                        .contentShape(Rectangle())
-                        .onTapGesture { toggle(label.id) }
                     }
+
+                    // Bottom actions
+                    HStack {
+                        Button("Clear All") {
+                            dismiss()
+                            DispatchQueue.main.async { onClear() }
+                        }
+                        .buttonStyle(SecondaryButtonStyle(size: .small))
+                        Spacer()
+                        Button("Apply") {
+                            selected = localSelected
+                            availableOnly = localAvailableOnly
+                            unlabeledOnly = localUnlabeledOnly
+                            matchAll = localMatchAll
+                            dismiss()
+                            DispatchQueue.main.async { onApply() }
+                        }
+                        .buttonStyle(PrimaryButtonStyle(size: .small))
+                    }
+                    .padding(.top, 8)
                 }
+                .padding()
             }
             .navigationTitle("Filters")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Clear All") {
-                        dismiss()
-                        DispatchQueue.main.async { onClear() }
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Apply") {
-                        // Commit local state back to parent, then notify
-                        selected = localSelected
-                        availableOnly = localAvailableOnly
-                        unlabeledOnly = localUnlabeledOnly
-                        matchAll = localMatchAll
-                        dismiss()
-                        DispatchQueue.main.async { onApply() }
-                    }
-                }
-                ToolbarItem(placement: .automatic) {
-                    Menu("Saved") {
-                        if savedFilters.isEmpty { Text("No saved filters") }
-                        ForEach(savedFilters) { filter in
-                            Button(filter.name) {
-                                localSelected = Set(filter.labelIds)
-                                localMatchAll = filter.matchAll
-                            }
-                        }
-                        Divider()
-                        Button("Save Current…") { showSaveDialog = true }
-                    }
-                }
-            }
             .searchable(text: $search)
             .task { await load() }
             .sheet(isPresented: $showSaveDialog) { saveSheet }
