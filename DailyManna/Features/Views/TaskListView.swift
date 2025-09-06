@@ -177,12 +177,11 @@ struct TaskListView: View {
                 matchAll: $viewModel.matchAll,
                 savedFilters: savedFilters,
                 onApply: {
-                    showFilterSheet = false
                     Telemetry.record(.filterApply)
                     _Concurrency.Task { await viewModel.fetchTasks(in: viewModel.selectedBucket) }
                 },
                 onClear: {
-                    viewModel.clearFilters(); showFilterSheet = false
+                    viewModel.clearFilters()
                     Telemetry.record(.filterClear)
                 }
             )
