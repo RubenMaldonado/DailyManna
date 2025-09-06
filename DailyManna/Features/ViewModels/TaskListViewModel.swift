@@ -144,7 +144,7 @@ final class TaskListViewModel: ObservableObject {
             let matchAllLocal = self.matchAll
             let sortByDueLocal = self.sortByDueDate
             let endOfTodayLocal = availableOnlyLocal ? self.availableCutoffEndOfToday() : nil
-            let (pairs, idSetsByTask) = try await Task.detached(priority: .userInitiated) { () -> ([(Task, [Label])], [UUID: Set<UUID>]) in
+            let (pairs, idSetsByTask) = await _Concurrency.Task.detached(priority: _Concurrency.TaskPriority.userInitiated) { () -> ([(Task, [Label])], [UUID: Set<UUID>]) in
                 var working = rawPairs
                 // Optional sort by due date
                 if sortByDueLocal {
