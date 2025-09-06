@@ -156,4 +156,21 @@ struct FilterSheetView: View {
     }
 }
 
+#Preview {
+    @State var selected: Set<UUID> = []
+    @State var available: Bool = true
+    @State var unlabeled: Bool = false
+    @State var matchAll: Bool = false
+    return FilterSheetView(
+        userId: UUID(),
+        selected: $selected,
+        availableOnly: $available,
+        unlabeledOnly: $unlabeled,
+        matchAll: $matchAll,
+        savedFilters: [],
+        onApply: {},
+        onClear: {}
+    )
+}
+
 

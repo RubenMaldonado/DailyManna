@@ -67,4 +67,19 @@ struct SyncStatusView: View {
     }
 }
 
+#Preview {
+    TaskListHeader(
+        onNew: {},
+        onSyncNow: {},
+        isSyncing: true,
+        userId: UUID(),
+        selectedBucket: .thisWeek,
+        showBucketMenu: true,
+        onSelectBucket: { _ in },
+        onOpenFilter: {},
+        activeFilterCount: 2
+    )
+    .background(Colors.background)
+}
+
 
