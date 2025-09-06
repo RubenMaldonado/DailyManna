@@ -623,7 +623,8 @@ private struct TopBarView: View {
                     SettingsView(viewModel: vm)
                 }
         }
-        .padding(.horizontal)
+        .padding(.horizontal, Spacing.medium)
+        .padding(.top, Spacing.small)
         .overlay(
             // Hidden keyboard shortcuts for power users (iOS/iPad/macOS where applicable)
             HStack(spacing: 0) {
@@ -942,7 +943,7 @@ private struct Deprecated_TasksListView: View { // kept temporarily if reference
                         .padding(.vertical, 2)
                 }
             }
-            .padding(.horizontal)
+            .padding(.horizontal, Spacing.medium)
             .onPreferenceChange(ListRowFramePreferenceKey.self) { value in
                 rowFrames.merge(value) { _, new in new }
             }
