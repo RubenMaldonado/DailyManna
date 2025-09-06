@@ -577,12 +577,9 @@ private struct TopBarView: View {
     
     var body: some View {
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
                 Text("Daily Manna").style(Typography.title2).foregroundColor(Colors.onSurface)
-                HStack(spacing: 6) {
-                    if isSyncing { ProgressView().scaleEffect(0.7) }
-                    Text(isSyncing ? "Syncing…" : "Up to date").style(Typography.caption).foregroundColor(isSyncing ? Colors.onSurfaceVariant : Colors.success)
-                }
+                SyncStatusView(isSyncing: isSyncing)
             }
             Spacer()
             // Bucket menu
@@ -594,7 +591,7 @@ private struct TopBarView: View {
                         }
                     }
                 } label: {
-                    HStack(spacing: 6) { Image(systemName: "tray" ); Text(selectedBucket.displayName) }
+                    HStack(spacing: 6) { Image(systemName: "tray" ); Text(selectedBucket.displayName).fixedSize(horizontal: true, vertical: false) }
                 }
                 .menuStyle(.borderlessButton)
             }
@@ -642,6 +639,25 @@ private struct TopBarView: View {
                     .opacity(0.0)
             }
         )
+    }
+}
+
+// Compact, non-reflowing sync status indicator
+private struct SyncStatusView: View {
+    let isSyncing: Bool
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(isSyncing ? Colors.onSurfaceVariant : Colors.success)
+                .frame(width: 8, height: 8)
+            // Reserve width to avoid layout shifts when caption changes
+            Text(isSyncing ? "Syncing…" : "Up to date")
+                .style(Typography.caption)
+                .foregroundColor(isSyncing ? Colors.onSurfaceVariant : Colors.success)
+                .frame(width: 80, alignment: .leading)
+                .accessibilityLabel(isSyncing ? "Sync in progress" : "Up to date")
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
