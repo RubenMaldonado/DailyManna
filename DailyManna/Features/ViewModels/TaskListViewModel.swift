@@ -49,6 +49,9 @@ final class TaskListViewModel: ObservableObject {
     private var recurringTemplateIdsCache: Set<UUID> = []
     private var recurrenceCacheDirty: Bool = true
     private var labelIdSetByTaskId: [UUID: Set<UUID>] = [:]
+    // Fetch single-flight to avoid overlapping mutations during view updates
+    private var fetchInFlight: Bool = false
+    private var fetchQueued: Bool = false
     
     init(taskUseCases: TaskUseCases, labelUseCases: LabelUseCases, userId: UUID, syncService: SyncService? = nil, recurrenceUseCases: RecurrenceUseCases? = nil) {
         self.taskUseCases = taskUseCases
@@ -117,6 +120,12 @@ final class TaskListViewModel: ObservableObject {
     }
     
     func fetchTasks(in bucket: TimeBucket? = nil, showLoading: Bool = true) async {
+        // Single-flight guard: coalesce overlapping fetches
+        if fetchInFlight {
+            fetchQueued = true
+            return
+        }
+        fetchInFlight = true
         // Keep sync view context aligned with current UI
         let effectiveBucket: TimeBucket? = isBoardModeActive ? nil : (bucket ?? selectedBucket)
         let bucketKey = effectiveBucket?.rawValue
@@ -125,59 +134,55 @@ final class TaskListViewModel: ObservableObject {
         if showLoading { isLoading = true }
         errorMessage = nil
         do {
-            var pairs = try await Logger.shared.time("fetchTasksWithLabels", category: .perf) {
+            let rawPairs = try await Logger.shared.time("fetchTasksWithLabels", category: .perf) {
                 try await taskUseCases.fetchTasksWithLabels(for: userId, in: bucket)
             }
-            // Optional sort by due date
-            if sortByDueDate {
-                pairs.sort { lhs, rhs in
-                    let lt = lhs.0
-                    let rt = rhs.0
-                    // Incomplete first
-                    if lt.isCompleted != rt.isCompleted { return !lt.isCompleted && rt.isCompleted }
-                    // Earliest due first; nils last
-                    switch (lt.dueAt, rt.dueAt) {
-                    case let (l?, r?): return l < r
-                    case (nil, _?): return false
-                    case (_?, nil): return true
-                    default: return lt.position < rt.position
+            // Perform sort/filter/build label-id sets off the main actor to avoid UI stalls
+            let availableOnlyLocal = self.availableOnly
+            let unlabeledOnlyLocal = self.unlabeledOnly
+            let activeIdsLocal = self.activeFilterLabelIds
+            let matchAllLocal = self.matchAll
+            let sortByDueLocal = self.sortByDueDate
+            let endOfTodayLocal = availableOnlyLocal ? self.availableCutoffEndOfToday() : nil
+            let (pairs, idSetsByTask) = try await Task.detached(priority: .userInitiated) { () -> ([(Task, [Label])], [UUID: Set<UUID>]) in
+                var working = rawPairs
+                // Optional sort by due date
+                if sortByDueLocal {
+                    working.sort { lhs, rhs in
+                        let lt = lhs.0
+                        let rt = rhs.0
+                        if lt.isCompleted != rt.isCompleted { return !lt.isCompleted && rt.isCompleted }
+                        switch (lt.dueAt, rt.dueAt) {
+                        case let (l?, r?): return l < r
+                        case (nil, _?): return false
+                        case (_?, nil): return true
+                        default: return lt.position < rt.position
+                        }
                     }
                 }
-            }
-            // Apply built-in "Available" filter first (session-only)
-            if availableOnly {
-                let endOfToday = availableCutoffEndOfToday()
-                pairs = await Logger.shared.time("filterAvailable", category: .perf) {
-                    let filtered = pairs.filter { pair in
+                if availableOnlyLocal, let end = endOfTodayLocal {
+                    working = working.filter { pair in
                         let t = pair.0
                         guard t.isCompleted == false else { return false }
-                        if let due = t.dueAt { return due <= endOfToday }
+                        if let due = t.dueAt { return due <= end }
                         return true
                     }
-                    return filtered
                 }
-            }
-            // Apply unlabeled-only filter or label-based filter
-            if unlabeledOnly {
-                pairs = await Logger.shared.time("filterUnlabeled", category: .perf) { pairs.filter { $0.1.isEmpty } }
-            } else if activeFilterLabelIds.isEmpty == false {
-                let target = activeFilterLabelIds
-                // Prebuild label id sets once per fetch to avoid per-row allocations
-                let idSetsByTask: [UUID: Set<UUID>] = Dictionary(uniqueKeysWithValues: pairs.map { ($0.0.id, Set($0.1.map { $0.id })) })
-                pairs = await Logger.shared.time("filterByLabels", category: .perf) {
-                    pairs.filter { pair in
+                if unlabeledOnlyLocal {
+                    working = working.filter { $0.1.isEmpty }
+                } else if activeIdsLocal.isEmpty == false {
+                    let idSetsByTask: [UUID: Set<UUID>] = Dictionary(uniqueKeysWithValues: working.map { ($0.0.id, Set($0.1.map { $0.id })) })
+                    working = working.filter { pair in
                         let ids = idSetsByTask[pair.0.id] ?? []
-                        return matchAll ? ids.isSuperset(of: target) : ids.intersection(target).isEmpty == false
+                        return matchAllLocal ? ids.isSuperset(of: activeIdsLocal) : ids.intersection(activeIdsLocal).isEmpty == false
                     }
+                    return (working, idSetsByTask)
                 }
-                // Persist memoized sets for visible rows
-                self.labelIdSetByTaskId = idSetsByTask
-            }
-            // Apply label filtering if any active
-            // Memoize visible label sets when no label filter is active as well
-            if activeFilterLabelIds.isEmpty {
-                self.labelIdSetByTaskId = Dictionary(uniqueKeysWithValues: pairs.map { ($0.0.id, Set($0.1.map { $0.id })) })
-            }
+                let idSetsByTask: [UUID: Set<UUID>] = Dictionary(uniqueKeysWithValues: working.map { ($0.0.id, Set($0.1.map { $0.id })) })
+                return (working, idSetsByTask)
+            }.value
+            // Persist memoized sets for visible rows
+            self.labelIdSetByTaskId = idSetsByTask
             // DEBUG batch telemetry: tasks and distinct labels per render batch
             #if DEBUG
             let distinctLabelCount: Int = {
@@ -187,7 +192,8 @@ final class TaskListViewModel: ObservableObject {
             }()
             Logger.shared.debug("renderBatch tasks=\(pairs.count) distinctLabels=\(distinctLabelCount)", category: .perf)
             #endif
-            await applyTasksListBatched(pairs)
+            // Commit result in one assignment to minimize view diff churn
+            self.tasksWithLabels = pairs
             await loadRecurrenceFlags(for: pairs.map { $0.0.id })
             // Load subtask progress for visible items incrementally
             let parentIds = pairs.map { $0.0.id }
@@ -197,6 +203,11 @@ final class TaskListViewModel: ObservableObject {
             Logger.shared.error("Failed to fetch tasks", category: .ui, error: error)
         }
         if showLoading { isLoading = false }
+        fetchInFlight = false
+        if fetchQueued {
+            fetchQueued = false
+            await fetchTasks(in: isBoardModeActive ? nil : selectedBucket, showLoading: false)
+        }
     }
 
     /// Batch-apply large list diffs to reduce a single massive diff cost in SwiftUI.
