@@ -183,7 +183,7 @@ struct TaskListView: View {
             }
         }
         .sheet(isPresented: $showFilterSheet) {
-            FilterPickerSheet(
+            FilterSheetView(
                 userId: userId,
                 selected: $viewModel.activeFilterLabelIds,
                 availableOnly: $viewModel.availableOnly,
