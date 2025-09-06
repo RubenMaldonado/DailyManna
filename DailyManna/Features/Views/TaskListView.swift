@@ -85,7 +85,9 @@ struct TaskListView: View {
                 onOpenFilter: {
                     Logger.shared.info("Open filter sheet", category: .ui)
                     Telemetry.record(.filterOpen)
-                    showFilterSheet = true
+                    if showFilterSheet == false {
+                        DispatchQueue.main.async { showFilterSheet = true }
+                    }
                 },
                 activeFilterCount: activeFilterCount
             )
