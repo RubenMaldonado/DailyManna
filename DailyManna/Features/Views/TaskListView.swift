@@ -79,6 +79,13 @@ struct TaskListView: View {
                 isSyncing: viewModel.isSyncing,
                 userId: userId,
                 selectedBucket: viewModel.selectedBucket,
+                showBucketMenu: {
+                    #if os(macOS)
+                    return viewMode != .board
+                    #else
+                    return viewMode != .board
+                    #endif
+                }(),
                 onSelectBucket: { bucket in
                     Logger.shared.info("Toolbar select bucket=\(bucket.rawValue)", category: .ui)
                     Telemetry.record(.bucketChange, metadata: ["bucket": bucket.rawValue])
@@ -96,9 +103,11 @@ struct TaskListView: View {
             )
             // bucket picker moved to toolbar menu
             // Debug settings moved under gear in top bar
-            BucketHeader(bucket: viewModel.selectedBucket,
-                         count: viewModel.bucketCounts[viewModel.selectedBucket] ?? 0)
-            .padding(.horizontal)
+            if viewMode != .board {
+                BucketHeader(bucket: viewModel.selectedBucket,
+                             count: viewModel.bucketCounts[viewModel.selectedBucket] ?? 0)
+                .padding(.horizontal)
+            }
             // Active filter chips row (shown only when there are active filters)
             if hasActiveFilters {
                 ActiveFiltersChips(
@@ -560,6 +569,7 @@ private struct TopBarView: View {
     let isSyncing: Bool
     let userId: UUID
     let selectedBucket: TimeBucket
+    let showBucketMenu: Bool
     let onSelectBucket: (TimeBucket) -> Void
     let onOpenFilter: () -> Void
     let activeFilterCount: Int
@@ -576,16 +586,18 @@ private struct TopBarView: View {
             }
             Spacer()
             // Bucket menu
-            Menu {
-                ForEach(TimeBucket.allCases.sorted { $0.sortOrder < $1.sortOrder }) { bucket in
-                    Button(action: { onSelectBucket(bucket) }) {
-                        HStack { Text(bucket.displayName); if bucket == selectedBucket { Spacer(); Image(systemName: "checkmark") } }
+            if showBucketMenu {
+                Menu {
+                    ForEach(TimeBucket.allCases.sorted { $0.sortOrder < $1.sortOrder }) { bucket in
+                        Button(action: { onSelectBucket(bucket) }) {
+                            HStack { Text(bucket.displayName); if bucket == selectedBucket { Spacer(); Image(systemName: "checkmark") } }
+                        }
                     }
+                } label: {
+                    HStack(spacing: 6) { Image(systemName: "tray" ); Text(selectedBucket.displayName) }
                 }
-            } label: {
-                HStack(spacing: 6) { Image(systemName: "tray" ); Text(selectedBucket.displayName) }
+                .menuStyle(.borderlessButton)
             }
-            .menuStyle(.borderlessButton)
             // Filter button
             Button(action: onOpenFilter) {
                 HStack(spacing: 6) {
