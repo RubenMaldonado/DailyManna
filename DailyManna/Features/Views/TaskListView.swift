@@ -23,6 +23,8 @@ struct TaskListView: View {
     @State private var viewMode: ViewMode = .list
     enum ViewMode: String, CaseIterable, Identifiable { case list = "List", board = "Board"; var id: String { rawValue } }
     @Environment(\.scenePhase) private var scenePhase
+    // Throttle to avoid re-entrant toolbar updates when opening filter
+    @State private var lastFilterOpenAt: TimeInterval = 0
     #if !os(macOS)
     @Environment(\.horizontalSizeClass) private var hSizeClass
     @State private var showBoard: Bool = false
@@ -85,9 +87,10 @@ struct TaskListView: View {
                 onOpenFilter: {
                     Logger.shared.info("Open filter sheet", category: .ui)
                     Telemetry.record(.filterOpen)
-                    if showFilterSheet == false {
-                        DispatchQueue.main.async { showFilterSheet = true }
-                    }
+                    let now = Date().timeIntervalSince1970
+                    if now - lastFilterOpenAt < 0.3 { return }
+                    lastFilterOpenAt = now
+                    if showFilterSheet == false { DispatchQueue.main.async { showFilterSheet = true } }
                 },
                 activeFilterCount: activeFilterCount
             )
@@ -647,6 +650,9 @@ private struct FilterPickerSheet: View {
     @State private var localAvailableOnly: Bool
     @State private var localUnlabeledOnly: Bool
     @State private var localMatchAll: Bool
+    // Save dialog
+    @State private var showSaveDialog: Bool = false
+    @State private var saveName: String = ""
 
     init(userId: UUID,
          selected: Binding<Set<UUID>>,
@@ -719,9 +725,23 @@ private struct FilterPickerSheet: View {
                         DispatchQueue.main.async { onApply() }
                     }
                 }
+                ToolbarItem(placement: .automatic) {
+                    Menu("Saved") {
+                        if savedFilters.isEmpty { Text("No saved filters") }
+                        ForEach(savedFilters) { filter in
+                            Button(filter.name) {
+                                localSelected = Set(filter.labelIds)
+                                localMatchAll = filter.matchAll
+                            }
+                        }
+                        Divider()
+                        Button("Save Current…") { showSaveDialog = true }
+                    }
+                }
             }
             .searchable(text: $search)
             .task { await load() }
+            .sheet(isPresented: $showSaveDialog) { saveSheet }
         }
     }
     private func load() async {
@@ -732,6 +752,34 @@ private struct FilterPickerSheet: View {
     }
     private var filtered: [Label] { let q = search.trimmingCharacters(in: .whitespacesAndNewlines); return q.isEmpty ? labels : labels.filter { $0.name.localizedCaseInsensitiveContains(q) } }
     private func toggle(_ id: UUID) { if localSelected.contains(id) { localSelected.remove(id) } else { localSelected.insert(id) } }
+
+    @ViewBuilder
+    private var saveSheet: some View {
+        VStack(spacing: 12) {
+            Text("Save Filter").font(.headline)
+            TextField("Name", text: $saveName).textFieldStyle(.roundedBorder)
+            HStack {
+                Button("Cancel") { showSaveDialog = false }
+                Spacer()
+                Button("Save") {
+                    let deps = Dependencies.shared
+                    if let repo: SavedFiltersRepository = try? deps.resolve(type: SavedFiltersRepository.self) {
+                        _Concurrency.Task {
+                            try? await repo.create(name: saveName.trimmingCharacters(in: .whitespacesAndNewlines),
+                                                   labelIds: Array(localSelected),
+                                                   matchAll: localMatchAll,
+                                                   userId: userId)
+                            saveName = ""
+                            showSaveDialog = false
+                        }
+                    }
+                }.disabled(saveName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .padding(.top, 4)
+        }
+        .padding()
+        .frame(minWidth: 320)
+    }
 }
 
 private struct ActiveFiltersChips: View {
