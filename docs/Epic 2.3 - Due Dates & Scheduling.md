@@ -14,3 +14,12 @@ Usage
 Notes
 - Notifications schedule on create/update and cancel on completion/delete/clear due date
 - No schema changes required; delta sync continues to track `due_at`
+
+### Date-only due dates
+- New field `due_has_time` (client: `dueHasTime`) indicates whether a time was set.
+- When `dueHasTime == false`:
+  - Overdue starts at the beginning of the next day (effective deadline is end-of-day of the selected date).
+  - Sorting and “Available only” filtering use the effective deadline (end-of-day) for comparisons.
+  - UI hides the time portion in chips and labels.
+  - Notifications are scheduled for 12:00 PM local time on the selected date.
+- Default behavior when picking a due date is date-only (no time). Enabling “Include time” shows time controls and stores the explicit time; chips display time accordingly.

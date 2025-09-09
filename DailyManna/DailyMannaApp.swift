@@ -101,7 +101,15 @@ struct DailyMannaApp: App {
                 syncService: syncService,
                 recurrenceUseCases: recurrenceUseCases
             )
+            #if os(macOS)
+            let viewModeStore = ViewModeStore()
+            let workingLogVM = WorkingLogPanelViewModel(userId: user.id)
+            return AnyView(MacToolbarHost(viewModel: viewModel, userId: user.id)
+                .environmentObject(viewModeStore)
+                .environmentObject(workingLogVM))
+            #else
             return AnyView(TaskListView(viewModel: viewModel, userId: user.id))
+            #endif
         } catch {
             Logger.shared.fault("Failed to resolve dependencies for TaskListView", category: .ui, error: error)
             return AnyView(Text("Error: \(error.localizedDescription)"))

@@ -20,6 +20,7 @@ struct TaskListView: View {
     @State private var showFilterSheet: Bool = false
     @State private var allLabels: [Label] = []
     @State private var savedFilters: [SavedFilter] = []
+    @State private var showSettings: Bool = false
     @State private var viewMode: ViewMode = .list
     enum ViewMode: String, CaseIterable, Identifiable { case list = "List", board = "Board"; var id: String { rawValue } }
     @Environment(\.scenePhase) private var scenePhase
@@ -29,9 +30,14 @@ struct TaskListView: View {
     @Environment(\.horizontalSizeClass) private var hSizeClass
     @State private var showBoard: Bool = false
     #endif
+    #if os(macOS)
+    @EnvironmentObject private var workingLogVM: WorkingLogPanelViewModel
+    @EnvironmentObject private var viewModeStore: ViewModeStore
+    #endif
     init(viewModel: TaskListViewModel, userId: UUID) {
         _viewModel = StateObject(wrappedValue: viewModel)
         self.userId = userId
+        // macOS receives WorkingLogPanelViewModel and ViewModeStore via environment from MacToolbarHost
     }
     
     // MARK: - Derived state
@@ -42,82 +48,33 @@ struct TaskListView: View {
         (viewModel.availableOnly ? 1 : 0) + (viewModel.unlabeledOnly ? 1 : 0) + viewModel.activeFilterLabelIds.count
     }
 
+    // Cross-platform view mode accessor: macOS reads from toolbar store; iOS uses local state
+    private var currentViewMode: ViewMode {
+        #if os(macOS)
+        return viewModeStore.mode
+        #else
+        return viewMode
+        #endif
+    }
+    
     var body: some View {
+        #if os(iOS)
+        NavigationStack { TaskListScreenIOS(viewModel: viewModel, userId: userId) }
+        #else
         NavigationStack {
-        VStack(spacing: 16) {
-            if let syncError = viewModel.syncErrorMessage {
-                Banner(kind: .error, message: syncError)
-                    .padding(.horizontal)
-                    .padding(.top, 8)
-                    .overlay(
-                        HStack {
-                            Spacer()
-                            Button("Retry") { _Concurrency.Task { await viewModel.sync() } }
-                                .buttonStyle(SecondaryButtonStyle(size: .small))
-                        }
-                        .padding(.trailing, 24)
-                    )
-            }
-            if let t = viewModel.pendingDelete {
-                Banner(kind: .warning, message: "\"\(t.title)\" will be moved to trash.")
-                    .padding(.horizontal)
-                    .padding(.top, 8)
-                    .overlay(
-                        HStack(spacing: 8) {
-                            Spacer()
-                            Button("Cancel") { viewModel.pendingDelete = nil }
-                                .buttonStyle(SecondaryButtonStyle(size: .small))
-                            Button("Delete", role: .destructive) { _Concurrency.Task { await viewModel.performDelete() } }
-                                .buttonStyle(PrimaryButtonStyle(size: .small))
-                        }
-                        .padding(.trailing, 24)
-                    )
-            }
-            TaskListHeader(
-                onNew: { viewModel.presentCreateForm() },
-                onSyncNow: { _Concurrency.Task { await viewModel.sync() } },
-                isSyncing: viewModel.isSyncing,
-                userId: userId,
-                selectedBucket: viewModel.selectedBucket,
-                showBucketMenu: viewMode != .board,
-                onSelectBucket: { bucket in
-                    Logger.shared.info("Toolbar select bucket=\(bucket.rawValue)", category: .ui)
-                    Telemetry.record(.bucketChange, metadata: ["bucket": bucket.rawValue])
-                    viewModel.select(bucket: bucket)
-                },
-                onOpenFilter: {
-                    Logger.shared.info("Open filter sheet", category: .ui)
-                    Telemetry.record(.filterOpen)
-                    let now = Date().timeIntervalSince1970
-                    if now - lastFilterOpenAt < 0.3 { return }
-                    lastFilterOpenAt = now
-                    if showFilterSheet == false { DispatchQueue.main.async { showFilterSheet = true } }
-                },
-                activeFilterCount: activeFilterCount
-            )
-            // bucket picker moved to toolbar menu
-            // Debug settings moved under gear in top bar
-            if viewMode != .board {
-                BucketHeader(bucket: viewModel.selectedBucket,
-                             count: viewModel.bucketCounts[viewModel.selectedBucket] ?? 0)
-                .padding(.horizontal)
-            }
-            // Active filter chips row (shown only when there are active filters)
-            if hasActiveFilters {
-                ActiveFiltersChips(
-                    labels: allLabels,
-                    selectedLabelIds: viewModel.activeFilterLabelIds,
-                    availableOnly: viewModel.availableOnly,
-                    unlabeledOnly: viewModel.unlabeledOnly,
-                    onRemoveLabel: { id in viewModel.activeFilterLabelIds.remove(id); _Concurrency.Task { await viewModel.fetchTasks(in: viewModel.selectedBucket) } },
-                    onClearAll: { viewModel.clearFilters() }
-                )
-                .padding(.horizontal)
-            }
-            contentSection
+        VStack(spacing: 0) {
+            syncErrorBanner.typeErased()
+            pendingDeleteBanner.typeErased()
+            headerBar.typeErased()
+            bucketHeaderIfNeeded.typeErased()
+            activeFiltersRow.typeErased()
+            contentSection.typeErased()
             Spacer(minLength: 0)
         }
+        .padding(.top, 0)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Colors.background)
+        // Leave header in its natural position; content manages split with panel on the side
         .task {
             await viewModel.refreshCounts()
             await viewModel.fetchTasks(in: viewModel.selectedBucket)
@@ -137,10 +94,12 @@ struct TaskListView: View {
         .onAppear {
             _Concurrency.Task { await viewModel.fetchTasks(in: viewModel.selectedBucket) }
         }
+        #if !os(macOS)
         .onChange(of: viewMode) { _, newMode in
             Logger.shared.info("View mode changed -> \(newMode.rawValue)", category: .ui)
             Telemetry.record(.viewSwitch, metadata: ["mode": newMode.rawValue])
         }
+        #endif
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("dm.filter.unlabeled"))) { _ in
             viewModel.applyUnlabeledFilter()
         }
@@ -150,7 +109,7 @@ struct TaskListView: View {
             }
         }
         #if os(macOS)
-        .onChange(of: viewMode) { _, mode in
+        .onChange(of: viewModeStore.mode) { _, mode in
             _Concurrency.Task {
                 if mode == .board {
                     viewModel.isBoardModeActive = true
@@ -160,6 +119,8 @@ struct TaskListView: View {
                     await viewModel.fetchTasks(in: viewModel.selectedBucket)
                 }
             }
+            Logger.shared.info("View mode changed -> \(mode.rawValue)", category: .ui)
+            Telemetry.record(.viewSwitch, metadata: ["mode": mode.rawValue])
         }
         #endif
         .sheet(isPresented: $viewModel.isPresentingTaskForm) {
@@ -194,17 +155,47 @@ struct TaskListView: View {
                 }
             )
         }
-        #if os(macOS)
-        .toolbar {
-            ToolbarItem(placement: .automatic) {
-                Picker("View", selection: $viewMode) {
-                    Image(systemName: "list.bullet").tag(ViewMode.list)
-                    Image(systemName: "rectangle.grid.2x2").tag(ViewMode.board)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 140)
-            }
+        .sheet(isPresented: $showSettings) {
+            let deps = Dependencies.shared
+            let vm = SettingsViewModel(
+                tasksRepository: try! deps.resolve(type: TasksRepository.self),
+                labelsRepository: try! deps.resolve(type: LabelsRepository.self),
+                remoteTasksRepository: try! deps.resolve(type: RemoteTasksRepository.self),
+                remoteLabelsRepository: try! deps.resolve(type: RemoteLabelsRepository.self),
+                syncService: try! deps.resolve(type: SyncService.self),
+                userId: userId
+            )
+            SettingsView(viewModel: vm)
         }
+        // toolbar moved to MacToolbarHost to prevent duplication
+        #if os(macOS)
+        // Hidden keyboard shortcuts for panel toggle / export on macOS
+        .overlay(
+            HStack(spacing: 0) {
+                Button("") { workingLogVM.toggleOpen() }
+                    .keyboardShortcut("l", modifiers: .command)
+                    .buttonStyle(.plain)
+                    .frame(width: 0, height: 0)
+                    .opacity(0.0)
+                Button("") {
+                    let md = WorkingLogMarkdownExporter.generate(
+                        rangeStart: workingLogVM.dateRange.start,
+                        rangeEnd: workingLogVM.dateRange.end,
+                        itemsByDay: workingLogVM.itemsByDay
+                    )
+                    let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+                    let name = "Working-Log_\(f.string(from: workingLogVM.dateRange.start))_to_\(f.string(from: workingLogVM.dateRange.end)).md"
+                    do {
+                        let url = try WorkingLogMarkdownExporter.saveToDefaultLocation(filename: name, contents: md)
+                        Telemetry.record(.workingLogExportMarkdown, metadata: ["file": url.lastPathComponent])
+                    } catch { }
+                }
+                .keyboardShortcut("e", modifiers: .command)
+                .buttonStyle(.plain)
+                .frame(width: 0, height: 0)
+                .opacity(0.0)
+            }
+        )
         #endif
         #if !os(macOS)
         .toolbar {
@@ -212,10 +203,10 @@ struct TaskListView: View {
                 if hSizeClass == .regular {
                     HStack(spacing: 8) {
                         Button { viewMode = .list } label: { Image(systemName: "list.bullet") }
-                            .buttonStyle(viewMode == .list ? PrimaryButtonStyle(size: .small) : SecondaryButtonStyle(size: .small))
+                            .buttonStyle(viewMode == .list ? AnyButtonStyle(PrimaryButtonStyle(size: .small)) : AnyButtonStyle(SecondaryButtonStyle(size: .small)))
                             .keyboardShortcut("1", modifiers: .command)
                         Button { viewMode = .board } label: { Image(systemName: "rectangle.grid.2x2") }
-                            .buttonStyle(viewMode == .board ? PrimaryButtonStyle(size: .small) : SecondaryButtonStyle(size: .small))
+                            .buttonStyle(viewMode == .board ? AnyButtonStyle(PrimaryButtonStyle(size: .small)) : AnyButtonStyle(SecondaryButtonStyle(size: .small)))
                             .keyboardShortcut("2", modifiers: .command)
                     }
                 } else {
@@ -243,18 +234,109 @@ struct TaskListView: View {
                 }
             }
         }
+        #if os(macOS)
+        // Hidden keyboard shortcuts for rescheduling within This Week
+        .overlay(
+            HStack(spacing: 0) {
+                Button("") {
+                    if viewModel.featureThisWeekSectionsEnabled && viewModel.selectedBucket == .thisWeek {
+                        // Move selected editing task forward a day if available
+                        if let task = viewModel.editingTask {
+                            let cal = Calendar.current
+                            let tomorrow = cal.date(byAdding: .day, value: 1, to: Date())!
+                            _Concurrency.Task { await viewModel.schedule(taskId: task.id, to: tomorrow) }
+                        }
+                    }
+                }
+                .keyboardShortcut(.rightArrow, modifiers: .command)
+                .buttonStyle(.plain)
+                .frame(width: 0, height: 0)
+                .opacity(0.0)
+                Button("") {
+                    if viewModel.featureThisWeekSectionsEnabled && viewModel.selectedBucket == .thisWeek {
+                        if let task = viewModel.editingTask {
+                            let cal = Calendar.current
+                            let yesterday = cal.date(byAdding: .day, value: -1, to: Date())!
+                            _Concurrency.Task { await viewModel.schedule(taskId: task.id, to: yesterday) }
+                        }
+                    }
+                }
+                .keyboardShortcut(.leftArrow, modifiers: .command)
+                .buttonStyle(.plain)
+                .frame(width: 0, height: 0)
+                .opacity(0.0)
+            }
+        )
+        #endif
         }
+        #endif
     }
 
     @ViewBuilder
     private var contentSection: some View {
         #if os(macOS)
-        if viewMode == .board {
+        if currentViewMode == .board {
             if let errorMessage = viewModel.errorMessage {
                 Banner(kind: .error, message: errorMessage).padding(.horizontal)
             }
-            InlineBoardView(viewModel: viewModel)
+            HStack(spacing: 0) {
+                // Board side with its own header already rendered above
+                InlineBoardView(viewModel: viewModel)
+                if workingLogVM.isOpen {
+                    Divider()
+                    WorkingLogPanelView(viewModel: workingLogVM)
+                        .frame(width: workingLogVM.panelWidth, alignment: .top)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                }
+            }
+            .frame(maxHeight: .infinity, alignment: .top)
         } else {
+            HStack(spacing: 0) {
+                if viewModel.isLoading {
+                    VStack(spacing: 12) { SkeletonTaskCard(); SkeletonTaskCard(); SkeletonTaskCard() }
+                        .padding(.horizontal)
+                } else if let errorMessage = viewModel.errorMessage {
+                    Banner(kind: .error, message: errorMessage)
+                        .padding(.horizontal)
+                } else if viewModel.tasksWithLabels.isEmpty {
+                    EmptyStateView(bucketName: viewModel.selectedBucket.displayName)
+                        .padding(.horizontal)
+                } else {
+                    if viewModel.featureThisWeekSectionsEnabled && viewModel.selectedBucket == .thisWeek {
+                        ThisWeekSectionsListView(
+                            viewModel: viewModel,
+                            onToggle: { task in _Concurrency.Task { await viewModel.toggleTaskCompletion(task: task) } },
+                            onEdit: { task in viewModel.presentEditForm(task: task) },
+                            onDelete: { task in viewModel.confirmDelete(task) }
+                        )
+                        .onAppear { Telemetry.record(.thisWeekViewShown, metadata: ["view": "list"]) }
+                        .transaction { $0.disablesAnimations = true }
+                    } else {
+                        TasksListView(
+                            bucket: viewModel.selectedBucket,
+                            tasksWithLabels: viewModel.tasksWithLabels,
+                            subtaskProgressByParent: viewModel.subtaskProgressByParent,
+                            onToggle: { task in _Concurrency.Task { await viewModel.toggleTaskCompletion(task: task) } },
+                            onEdit: { task in viewModel.presentEditForm(task: task) },
+                            onMove: { taskId, bucket in _Concurrency.Task { await viewModel.move(taskId: taskId, to: bucket) } },
+                            onReorder: { taskId, targetIndex in _Concurrency.Task { await viewModel.reorder(taskId: taskId, to: viewModel.selectedBucket, targetIndex: targetIndex) } },
+                            onDelete: { task in viewModel.confirmDelete(task) }
+                        )
+                        .transaction { $0.disablesAnimations = true }
+                    }
+                }
+                if workingLogVM.isOpen {
+                    Divider()
+                    WorkingLogPanelView(viewModel: workingLogVM)
+                        .frame(width: workingLogVM.panelWidth, alignment: .top)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                }
+            }
+            .frame(maxHeight: .infinity, alignment: .top)
+        }
+        #else
+        HStack(spacing: 0) {
+            // List content on the left
             if viewModel.isLoading {
                 VStack(spacing: 12) { SkeletonTaskCard(); SkeletonTaskCard(); SkeletonTaskCard() }
                     .padding(.horizontal)
@@ -277,29 +359,7 @@ struct TaskListView: View {
                 )
                 .transaction { $0.disablesAnimations = true }
             }
-        }
-        #else
-        if viewModel.isLoading {
-            VStack(spacing: 12) { SkeletonTaskCard(); SkeletonTaskCard(); SkeletonTaskCard() }
-                .padding(.horizontal)
-        } else if let errorMessage = viewModel.errorMessage {
-            Banner(kind: .error, message: errorMessage)
-                .padding(.horizontal)
-        } else if viewModel.tasksWithLabels.isEmpty {
-            EmptyStateView(bucketName: viewModel.selectedBucket.displayName)
-                .padding(.horizontal)
-        } else {
-            TasksListView(
-                bucket: viewModel.selectedBucket,
-                tasksWithLabels: viewModel.tasksWithLabels,
-                subtaskProgressByParent: viewModel.subtaskProgressByParent,
-                onToggle: { task in _Concurrency.Task { await viewModel.toggleTaskCompletion(task: task) } },
-                onEdit: { task in viewModel.presentEditForm(task: task) },
-                onMove: { taskId, bucket in _Concurrency.Task { await viewModel.move(taskId: taskId, to: bucket) } },
-                onReorder: { taskId, targetIndex in _Concurrency.Task { await viewModel.reorder(taskId: taskId, to: viewModel.selectedBucket, targetIndex: targetIndex) } },
-                onDelete: { task in viewModel.confirmDelete(task) }
-            )
-            .transaction { $0.disablesAnimations = true }
+            // Working Log panel is macOS only
         }
         #endif
     }
@@ -310,6 +370,95 @@ private extension TaskListView {}
 
 // MARK: - Data loaders for filters
 private extension TaskListView {
+    @ViewBuilder
+    var syncErrorBanner: some View {
+        if let syncError = viewModel.syncErrorMessage {
+            Banner(kind: .error, message: syncError)
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .overlay(
+                    HStack {
+                        Spacer()
+                        Button("Retry") { _Concurrency.Task { await viewModel.sync() } }
+                            .buttonStyle(SecondaryButtonStyle(size: .small))
+                    }
+                    .padding(.trailing, 24)
+                )
+        }
+    }
+
+    @ViewBuilder
+    var pendingDeleteBanner: some View {
+        if let t = viewModel.pendingDelete {
+            Banner(kind: .warning, message: "\"\(t.title)\" will be moved to trash.")
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .overlay(
+                    HStack(spacing: 8) {
+                        Spacer()
+                        Button("Cancel") { viewModel.pendingDelete = nil }
+                            .buttonStyle(SecondaryButtonStyle(size: .small))
+                        Button("Delete", role: .destructive) { _Concurrency.Task { await viewModel.performDelete() } }
+                            .buttonStyle(PrimaryButtonStyle(size: .small))
+                    }
+                    .padding(.trailing, 24)
+                )
+        }
+    }
+
+    @ViewBuilder
+    var headerBar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TaskListHeader(
+                onNew: { viewModel.presentCreateForm() },
+                onSyncNow: { _Concurrency.Task { await viewModel.sync() } },
+                isSyncing: viewModel.isSyncing,
+                userId: userId,
+                selectedBucket: viewModel.selectedBucket,
+                showBucketMenu: currentViewMode != .board,
+                onSelectBucket: { bucket in
+                    Logger.shared.info("Toolbar select bucket=\(bucket.rawValue)", category: .ui)
+                    Telemetry.record(.bucketChange, metadata: ["bucket": bucket.rawValue])
+                    viewModel.select(bucket: bucket)
+                },
+                onOpenFilter: {
+                    Logger.shared.info("Open filter sheet", category: .ui)
+                    Telemetry.record(.filterOpen)
+                    let now = Date().timeIntervalSince1970
+                    if now - lastFilterOpenAt < 0.3 { return }
+                    lastFilterOpenAt = now
+                    if showFilterSheet == false { DispatchQueue.main.async { showFilterSheet = true } }
+                },
+                activeFilterCount: activeFilterCount,
+                onOpenSettings: { showSettings = true }
+            )
+        }
+    }
+
+    @ViewBuilder
+    var bucketHeaderIfNeeded: some View {
+        if currentViewMode != .board {
+            BucketHeader(bucket: viewModel.selectedBucket,
+                         count: viewModel.bucketCounts[viewModel.selectedBucket] ?? 0)
+            .padding(.horizontal)
+        }
+    }
+
+    @ViewBuilder
+    var activeFiltersRow: some View {
+        if hasActiveFilters {
+            ActiveFiltersChips(
+                labels: allLabels,
+                selectedLabelIds: viewModel.activeFilterLabelIds,
+                availableOnly: viewModel.availableOnly,
+                unlabeledOnly: viewModel.unlabeledOnly,
+                onRemoveLabel: { id in viewModel.activeFilterLabelIds.remove(id); _Concurrency.Task { await viewModel.fetchTasks(in: viewModel.selectedBucket) } },
+                onClearAll: { viewModel.clearFilters() }
+            )
+            .padding(.horizontal)
+        }
+    }
+
     func loadLabels() async {
         let deps = Dependencies.shared
         if let useCases: LabelUseCases = try? deps.resolve(type: LabelUseCases.self) {
@@ -411,23 +560,7 @@ private struct TopBarView: View {
 }
 
 // Compact, non-reflowing sync status indicator
-private struct SyncStatusView: View {
-    let isSyncing: Bool
-    var body: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(isSyncing ? Colors.onSurfaceVariant : Colors.success)
-                .frame(width: 8, height: 8)
-            // Reserve width to avoid layout shifts when caption changes
-            Text(isSyncing ? "Syncing…" : "Up to date")
-                .style(Typography.caption)
-                .foregroundColor(isSyncing ? Colors.onSurfaceVariant : Colors.success)
-                .frame(width: 80, alignment: .leading)
-                .accessibilityLabel(isSyncing ? "Sync in progress" : "Up to date")
-        }
-        .accessibilityElement(children: .combine)
-    }
-}
+// SyncStatusView moved to TaskListHeader.swift
 
 private struct FilterPickerSheet: View {
     let userId: UUID

@@ -67,7 +67,16 @@ struct TaskCard: View {
                 // Secondary rows depend on layout
                 if layout == .board {
                     if !labels.isEmpty { FlowingChipsView(labels: labels) }
-                    if let dueAt = task.dueAt { DueChip(date: dueAt, isOverdue: !task.isCompleted && dueAt < Date()) }
+                    if let dueAt = task.dueAt {
+                        let now = Date()
+                        let cal = Calendar.current
+                        let deadline: Date = {
+                            if task.dueHasTime { return dueAt }
+                            let start = cal.startOfDay(for: dueAt)
+                            return cal.date(byAdding: .day, value: 1, to: start) ?? dueAt
+                        }()
+                        DueChip(date: dueAt, showsTime: task.dueHasTime, isOverdue: !task.isCompleted && now >= deadline)
+                    }
                 } else {
                     HStack(alignment: .center, spacing: Spacing.small) {
                         if !labels.isEmpty {
@@ -78,7 +87,16 @@ struct TaskCard: View {
                             }
                         }
                         Spacer(minLength: 0)
-                        if let dueAt = task.dueAt { DueChip(date: dueAt, isOverdue: !task.isCompleted && dueAt < Date()) }
+                        if let dueAt = task.dueAt {
+                            let now = Date()
+                            let cal = Calendar.current
+                            let deadline: Date = {
+                                if task.dueHasTime { return dueAt }
+                                let start = cal.startOfDay(for: dueAt)
+                                return cal.date(byAdding: .day, value: 1, to: start) ?? dueAt
+                            }()
+                            DueChip(date: dueAt, showsTime: task.dueHasTime, isOverdue: !task.isCompleted && now >= deadline)
+                        }
                     }
                 }
                 // Optional: keep subtask progress at the end
@@ -151,11 +169,12 @@ private struct FlowingChipsView: View {
 
 private struct DueChip: View {
     let date: Date
+    var showsTime: Bool = true
     var isOverdue: Bool = false
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "clock")
-            Text(DateFormatter.shortDate.string(from: date))
+            Text(showsTime ? DateFormatter.shortDateTime.string(from: date) : DateFormatter.shortDate.string(from: date))
         }
         .font(.caption2)
         .padding(.horizontal, 6)
@@ -163,12 +182,18 @@ private struct DueChip: View {
         .foregroundColor(isOverdue ? .white : Colors.onSurface)
         .background(isOverdue ? Color.red : Colors.surfaceVariant)
         .clipShape(Capsule())
-        .accessibilityLabel(isOverdue ? "Overdue, was due \(DateFormatter.shortDate.string(from: date))" : "Due \(DateFormatter.shortDate.string(from: date))")
+        .accessibilityLabel(isOverdue ? "Overdue, was due \(showsTime ? DateFormatter.shortDateTime.string(from: date) : DateFormatter.shortDate.string(from: date))" : "Due \(showsTime ? DateFormatter.shortDateTime.string(from: date) : DateFormatter.shortDate.string(from: date))")
     }
 }
 
 private extension DateFormatter {
     static let shortDate: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .none
+        return formatter
+    }()
+    static let shortDateTime: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .short
         formatter.timeStyle = .short

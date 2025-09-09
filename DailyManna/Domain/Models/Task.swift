@@ -17,6 +17,7 @@ public struct Task: Identifiable, Equatable, Hashable, Codable {
     public var title: String
     public var description: String?
     public var dueAt: Date?
+    public var dueHasTime: Bool = true
     public var recurrenceRule: String?
     public var priority: TaskPriority = .normal
     public var reminders: [Date]? = nil
@@ -40,6 +41,7 @@ public struct Task: Identifiable, Equatable, Hashable, Codable {
         title: String,
         description: String? = nil,
         dueAt: Date? = nil,
+        dueHasTime: Bool = true,
         recurrenceRule: String? = nil,
         priority: TaskPriority = .normal,
         reminders: [Date]? = nil,
@@ -60,6 +62,7 @@ public struct Task: Identifiable, Equatable, Hashable, Codable {
         self.title = title
         self.description = description
         self.dueAt = dueAt
+        self.dueHasTime = dueHasTime
         self.recurrenceRule = recurrenceRule
         self.priority = priority
         self.reminders = reminders

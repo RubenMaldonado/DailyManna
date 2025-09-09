@@ -19,6 +19,7 @@ final class TaskEntity {
     var title: String
     var taskDescription: String? // Renamed to avoid conflict with Swift's `description`
     var dueAt: Date?
+    var dueHasTime: Bool = true
     var recurrenceRule: String?
     var isCompleted: Bool
     var completedAt: Date?
@@ -44,6 +45,7 @@ final class TaskEntity {
         title: String,
         taskDescription: String? = nil,
         dueAt: Date? = nil,
+        dueHasTime: Bool = true,
         recurrenceRule: String? = nil,
         isCompleted: Bool = false,
         completedAt: Date? = nil,
@@ -62,6 +64,7 @@ final class TaskEntity {
         self.title = title
         self.taskDescription = taskDescription
         self.dueAt = dueAt
+        self.dueHasTime = dueHasTime
         self.recurrenceRule = recurrenceRule
         self.isCompleted = isCompleted
         self.completedAt = completedAt
@@ -85,6 +88,7 @@ final class TaskEntity {
             title: title,
             description: taskDescription,
             dueAt: dueAt,
+            dueHasTime: dueHasTime,
             recurrenceRule: recurrenceRule,
             isCompleted: isCompleted,
             completedAt: completedAt,
@@ -105,6 +109,7 @@ final class TaskEntity {
         self.title = domain.title
         self.taskDescription = domain.description
         self.dueAt = domain.dueAt
+        self.dueHasTime = domain.dueHasTime
         self.recurrenceRule = domain.recurrenceRule
         self.isCompleted = domain.isCompleted
         self.completedAt = domain.completedAt
@@ -129,6 +134,7 @@ extension TaskEntity {
             title: domain.title,
             taskDescription: domain.description,
             dueAt: domain.dueAt,
+            dueHasTime: domain.dueHasTime,
             recurrenceRule: domain.recurrenceRule,
             isCompleted: domain.isCompleted,
             completedAt: domain.completedAt,

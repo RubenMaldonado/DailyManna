@@ -75,10 +75,16 @@ final class AvailableFilterTests: XCTestCase {
         let pairs: [(Task, [Label])] = [(t1, []), (t2, [])]
         let model = StubViewModel()
         let endOfToday = model.availableCutoffEndOfToday()
+        func effectiveDue(_ t: Task) -> Date? {
+            guard let due = t.dueAt else { return nil }
+            if t.dueHasTime { return due }
+            let start = Calendar.current.startOfDay(for: due)
+            return Calendar.current.date(byAdding: .day, value: 1, to: start) ?? due
+        }
         let filtered = pairs.filter { pair in
             let t = pair.0
             guard t.isCompleted == false else { return false }
-            if let due = t.dueAt { return due <= endOfToday }
+            if let due = effectiveDue(t) { return due <= endOfToday }
             return true
         }
         XCTAssertEqual(filtered.count, 2)
@@ -91,10 +97,16 @@ final class AvailableFilterTests: XCTestCase {
         var t = TestFactories.task(userId: uid, title: "Boundary", now: end)
         t.dueAt = end
         let pairs: [(Task, [Label])] = [(t, [])]
+        func effectiveDue(_ t: Task) -> Date? {
+            guard let due = t.dueAt else { return nil }
+            if t.dueHasTime { return due }
+            let start = Calendar.current.startOfDay(for: due)
+            return Calendar.current.date(byAdding: .day, value: 1, to: start) ?? due
+        }
         let filtered = pairs.filter { pair in
             let tt = pair.0
             guard tt.isCompleted == false else { return false }
-            if let due = tt.dueAt { return due <= end }
+            if let due = effectiveDue(tt) { return due <= end }
             return true
         }
         XCTAssertEqual(filtered.count, 1)
@@ -112,13 +124,60 @@ final class AvailableFilterTests: XCTestCase {
         var t2 = TestFactories.task(userId: uid, title: "After cutoff", now: end)
         t2.dueAt = Calendar.current.date(byAdding: .second, value: 10, to: end)
         let pairs: [(Task, [Label])] = [(t1, []), (t2, [])]
+        func effectiveDue(_ t: Task) -> Date? {
+            guard let due = t.dueAt else { return nil }
+            if t.dueHasTime { return due }
+            let start = Calendar.current.startOfDay(for: due)
+            return Calendar.current.date(byAdding: .day, value: 1, to: start) ?? due
+        }
         let filtered = pairs.filter { pair in
             let tt = pair.0
             guard tt.isCompleted == false else { return false }
-            if let due = tt.dueAt { return due <= end }
+            if let due = effectiveDue(tt) { return due <= end }
             return true
         }
         XCTAssertEqual(filtered.map { $0.0.title }.sorted(), ["Before cutoff"]) // only before cutoff included
+    }
+
+    func test_dateOnly_today_included_until_endOfDay() async throws {
+        let uid = TestFactories.userId(4)
+        let now = Date()
+        var t = TestFactories.task(userId: uid, title: "Date-only today", now: now)
+        var comps = Calendar.current.dateComponents([.year, .month, .day], from: now)
+        comps.hour = 9
+        comps.minute = 0
+        t.dueAt = Calendar.current.date(from: comps)
+        t.dueHasTime = false
+        let end = StubViewModel().availableCutoffEndOfToday()
+        func effectiveDue(_ tt: Task) -> Date? {
+            guard let due = tt.dueAt else { return nil }
+            if tt.dueHasTime { return due }
+            let start = Calendar.current.startOfDay(for: due)
+            return Calendar.current.date(byAdding: .day, value: 1, to: start) ?? due
+        }
+        let included = (effectiveDue(t)! <= end)
+        XCTAssertTrue(included)
+    }
+
+    func test_dateOnly_tomorrow_excluded_today() async throws {
+        let uid = TestFactories.userId(5)
+        let now = Date()
+        var t = TestFactories.task(userId: uid, title: "Date-only tomorrow", now: now)
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: now)!
+        var comps = Calendar.current.dateComponents([.year, .month, .day], from: tomorrow)
+        comps.hour = 9
+        comps.minute = 0
+        t.dueAt = Calendar.current.date(from: comps)
+        t.dueHasTime = false
+        let end = StubViewModel().availableCutoffEndOfToday()
+        func effectiveDue(_ tt: Task) -> Date? {
+            guard let due = tt.dueAt else { return nil }
+            if tt.dueHasTime { return due }
+            let start = Calendar.current.startOfDay(for: due)
+            return Calendar.current.date(byAdding: .day, value: 1, to: start) ?? due
+        }
+        let includedToday = (effectiveDue(t)! <= end)
+        XCTAssertFalse(includedToday)
     }
 }
 

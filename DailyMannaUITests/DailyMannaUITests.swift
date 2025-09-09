@@ -57,4 +57,15 @@ final class DailyMannaUITests: XCTestCase {
             }
         }
     }
+
+    #if os(macOS)
+    func test_toolbar_singletons() {
+        // Validate that titlebar controls are not duplicated
+        // Using identifiers attached in MacToolbarHost
+        let viewMode = app.buttons.matching(identifier: "toolbar.viewMode")
+        XCTAssertLessThanOrEqual(viewMode.count, 1)
+        let workingLog = app.buttons.matching(identifier: "toolbar.workingLogToggle")
+        XCTAssertLessThanOrEqual(workingLog.count, 1)
+    }
+    #endif
 }

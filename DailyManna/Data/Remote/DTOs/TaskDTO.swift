@@ -16,6 +16,7 @@ struct TaskDTO: Codable {
     let title: String
     let description: String?
     let due_at: Date?
+    let due_has_time: Bool?
     let recurrence_rule: String?
     let is_completed: Bool
     let completed_at: Date?
@@ -33,6 +34,7 @@ struct TaskDTO: Codable {
             title: task.title,
             description: task.description,
             due_at: task.dueAt,
+            due_has_time: task.dueHasTime,
             recurrence_rule: task.recurrenceRule,
             is_completed: task.isCompleted,
             completed_at: task.completedAt,
@@ -52,6 +54,7 @@ struct TaskDTO: Codable {
             title: title,
             description: description,
             dueAt: due_at,
+            dueHasTime: due_has_time ?? true,
             recurrenceRule: recurrence_rule,
             // priority/reminders remain local-only until backend columns exist
             isCompleted: is_completed,

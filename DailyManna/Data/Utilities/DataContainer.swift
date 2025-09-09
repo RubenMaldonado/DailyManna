@@ -29,6 +29,7 @@ final class DataContainer {
     private let _tasksRepository: SwiftDataTasksRepository
     private let _labelsRepository: SwiftDataLabelsRepository
     private let _syncStateStore: SyncStateStore
+    private let _workingLogRepository: SwiftDataWorkingLogRepository
     
     init() throws {
         let schema = Schema([
@@ -39,7 +40,8 @@ final class DataContainer {
             SyncStateEntity.self,
             SavedFilterEntity.self,
             RecurrenceEntity.self,
-            RecurrenceInstanceEntity.self
+            RecurrenceInstanceEntity.self,
+            WorkingLogItemEntity.self
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         
@@ -95,6 +97,7 @@ final class DataContainer {
         self._tasksRepository = SwiftDataTasksRepository(modelContext: modelContext)
         self._labelsRepository = SwiftDataLabelsRepository(modelContext: modelContext)
         self._syncStateStore = SyncStateStore(modelContext: modelContext)
+        self._workingLogRepository = SwiftDataWorkingLogRepository(modelContext: modelContext)
     }
     
     /// Private initializer for test containers
@@ -106,7 +109,8 @@ final class DataContainer {
             SyncStateEntity.self,
             SavedFilterEntity.self,
             RecurrenceEntity.self,
-            RecurrenceInstanceEntity.self
+            RecurrenceInstanceEntity.self,
+            WorkingLogItemEntity.self
         ])
         
         let modelConfiguration = ModelConfiguration(
@@ -128,6 +132,7 @@ final class DataContainer {
         self._tasksRepository = SwiftDataTasksRepository(modelContext: modelContext)
         self._labelsRepository = SwiftDataLabelsRepository(modelContext: modelContext)
         self._syncStateStore = SyncStateStore(modelContext: modelContext)
+        self._workingLogRepository = SwiftDataWorkingLogRepository(modelContext: modelContext)
     }
     
     /// Creates a test container with in-memory storage
@@ -147,5 +152,9 @@ final class DataContainer {
     
     var syncStateStore: SyncStateStore {
         return _syncStateStore
+    }
+    
+    var workingLogRepository: WorkingLogRepository {
+        return _workingLogRepository
     }
 }

@@ -104,7 +104,7 @@ actor SwiftDataLabelsRepository: LabelsRepository {
     func fetchLabelsForTask(_ taskId: UUID) async throws -> [Label] {
         let descriptor = FetchDescriptor<TaskLabelEntity>(
             predicate: #Predicate<TaskLabelEntity> { entity in
-                entity.taskId == taskId
+                entity.taskId == taskId && entity.deletedAt == nil
             }
         )
         let taskLabelEntities = try modelContext.fetch(descriptor)
@@ -122,7 +122,7 @@ actor SwiftDataLabelsRepository: LabelsRepository {
     func fetchTasks(with labelId: UUID) async throws -> [Task] {
         let descriptor = FetchDescriptor<TaskLabelEntity>(
             predicate: #Predicate<TaskLabelEntity> { entity in
-                entity.labelId == labelId
+                entity.labelId == labelId && entity.deletedAt == nil
             }
         )
         let taskLabelEntities = try modelContext.fetch(descriptor)

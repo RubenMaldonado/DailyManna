@@ -8,6 +8,7 @@
 import Foundation
 import Combine
 import SwiftUI
+import Foundation
 
 @MainActor
 final class TaskListViewModel: ObservableObject {
@@ -52,6 +53,17 @@ final class TaskListViewModel: ObservableObject {
     // Fetch single-flight to avoid overlapping mutations during view updates
     private var fetchInFlight: Bool = false
     private var fetchQueued: Bool = false
+    // Feature flag: enable weekday sections inside This Week
+    @AppStorage("feature.thisWeekSections") var featureThisWeekSectionsEnabled: Bool = true
+    // Collapsed state persistence for per-day sections (keys are yyyy-MM-dd)
+    @AppStorage("thisWeek.collapsedDayKeys") private var collapsedDaysRaw: String = ""
+    private var collapsedDayKeys: Set<String> {
+        get { (try? JSONDecoder().decode(Set<String>.self, from: Data(collapsedDaysRaw.utf8))) ?? [] }
+        set { if let data = try? JSONEncoder().encode(Array(newValue)) { collapsedDaysRaw = String(decoding: data, as: UTF8.self) } }
+    }
+    // Derived sections & grouping for This Week bucket
+    @Published var thisWeekSections: [WeekdaySection] = []
+    @Published var tasksByDayKey: [String: [(Task, [Label])]] = [:]
     
     init(taskUseCases: TaskUseCases, labelUseCases: LabelUseCases, userId: UUID, syncService: SyncService? = nil, recurrenceUseCases: RecurrenceUseCases? = nil) {
         self.taskUseCases = taskUseCases
@@ -146,13 +158,21 @@ final class TaskListViewModel: ObservableObject {
             let endOfTodayLocal = availableOnlyLocal ? self.availableCutoffEndOfToday() : nil
             let (pairs, idSetsByTask) = await _Concurrency.Task.detached(priority: _Concurrency.TaskPriority.userInitiated) { () -> ([(Task, [Label])], [UUID: Set<UUID>]) in
                 var working = rawPairs
+                // Helper to compute effective due (date-only as end-of-day)
+                func effectiveDue(_ t: Task) -> Date? {
+                    guard let due = t.dueAt else { return nil }
+                    if t.dueHasTime { return due }
+                    let cal = Calendar.current
+                    let start = cal.startOfDay(for: due)
+                    return cal.date(byAdding: .day, value: 1, to: start) ?? due
+                }
                 // Optional sort by due date
                 if sortByDueLocal {
                     working.sort { lhs, rhs in
                         let lt = lhs.0
                         let rt = rhs.0
                         if lt.isCompleted != rt.isCompleted { return !lt.isCompleted && rt.isCompleted }
-                        switch (lt.dueAt, rt.dueAt) {
+                        switch (effectiveDue(lt), effectiveDue(rt)) {
                         case let (l?, r?): return l < r
                         case (nil, _?): return false
                         case (_?, nil): return true
@@ -164,7 +184,7 @@ final class TaskListViewModel: ObservableObject {
                     working = working.filter { pair in
                         let t = pair.0
                         guard t.isCompleted == false else { return false }
-                        if let due = t.dueAt { return due <= end }
+                        if let due = effectiveDue(t) { return due <= end }
                         return true
                     }
                 }
@@ -198,6 +218,10 @@ final class TaskListViewModel: ObservableObject {
             // Load subtask progress for visible items incrementally
             let parentIds = pairs.map { $0.0.id }
             await loadSubtaskProgressIncremental(for: parentIds)
+            // Derive weekday sections/groupings when relevant
+            if featureThisWeekSectionsEnabled {
+                deriveThisWeekSectionsAndGroups()
+            }
         } catch {
             errorMessage = "Failed to fetch tasks: \(error.localizedDescription)"
             Logger.shared.error("Failed to fetch tasks", category: .ui, error: error)
@@ -294,6 +318,7 @@ final class TaskListViewModel: ObservableObject {
         availableOnly = false
         _Concurrency.Task { await self.fetchTasks(in: self.isBoardModeActive ? nil : self.selectedBucket) }
         persistFilterIds()
+        if featureThisWeekSectionsEnabled { deriveThisWeekSectionsAndGroups() }
     }
 
     func select(bucket: TimeBucket) {
@@ -306,6 +331,7 @@ final class TaskListViewModel: ObservableObject {
             async let fetch: Void = self.fetchTasks(in: bucket)
             async let counts: Void = self.refreshCounts()
             _ = await (fetch, counts)
+            if self.featureThisWeekSectionsEnabled { self.deriveThisWeekSectionsAndGroups() }
         }
     }
 
@@ -461,7 +487,7 @@ final class TaskListViewModel: ObservableObject {
             let ids = Set(labels.map { $0.id })
             try await taskUseCases.setLabels(for: newTask.id, to: ids, userId: userId)
             await refreshCounts()
-            await fetchTasks(in: isBoardModeActive ? nil : selectedBucket)
+            await fetchTasks(in: isBoardModeActive ? nil : selectedBucket, showLoading: false)
         } catch {
             Logger.shared.error("Failed to generate next instance", category: .ui, error: error)
         }
@@ -483,7 +509,14 @@ final class TaskListViewModel: ObservableObject {
                 let updated = draft.applying(to: editing)
                 try await taskUseCases.updateTask(updated)
                 if let due = updated.dueAt, !updated.isCompleted {
-                    await NotificationsManager.scheduleDueNotification(taskId: updated.id, title: updated.title, dueAt: due, bucketKey: updated.bucketKey.rawValue)
+                    let scheduleAt: Date = {
+                        if updated.dueHasTime { return due }
+                        var comps = Calendar.current.dateComponents([.year,.month,.day], from: due)
+                        comps.hour = 12
+                        comps.minute = 0
+                        return Calendar.current.date(from: comps) ?? due
+                    }()
+                    await NotificationsManager.scheduleDueNotification(taskId: updated.id, title: updated.title, dueAt: scheduleAt, bucketKey: updated.bucketKey.rawValue)
                 } else {
                     await NotificationsManager.cancelDueNotification(taskId: updated.id)
                 }
@@ -506,7 +539,14 @@ final class TaskListViewModel: ObservableObject {
                 let newTask = draft.toNewTask()
                 try await taskUseCases.createTask(newTask)
                 if let due = newTask.dueAt {
-                    await NotificationsManager.scheduleDueNotification(taskId: newTask.id, title: newTask.title, dueAt: due, bucketKey: newTask.bucketKey.rawValue)
+                    let scheduleAt: Date = {
+                        if newTask.dueHasTime { return due }
+                        var comps = Calendar.current.dateComponents([.year,.month,.day], from: due)
+                        comps.hour = 12
+                        comps.minute = 0
+                        return Calendar.current.date(from: comps) ?? due
+                    }()
+                    await NotificationsManager.scheduleDueNotification(taskId: newTask.id, title: newTask.title, dueAt: scheduleAt, bucketKey: newTask.bucketKey.rawValue)
                 }
                 // For new tasks, selections were posted keyed by draft.id before creation.
                 if let desired = pendingLabelSelections[draft.id] {
@@ -704,5 +744,76 @@ final class TaskListViewModel: ObservableObject {
     func initialSyncIfNeeded() async {
         guard let syncService = syncService else { return }
         await syncService.performInitialSync(for: userId)
+    }
+
+    // MARK: - This Week sections & scheduling
+    private func deriveThisWeekSectionsAndGroups() {
+        guard selectedBucket == .thisWeek else {
+            thisWeekSections = []
+            tasksByDayKey = [:]
+            return
+        }
+        let now = Date()
+        let sections = WeekPlanner.buildSections(for: now)
+        thisWeekSections = sections
+        var grouped: [String: [(Task,[Label])]] = [:]
+        let cal = Calendar.current
+        let startToday = cal.startOfDay(for: now)
+        for pair in tasksWithLabels {
+            let task = pair.0
+            guard task.bucketKey == .thisWeek, task.isCompleted == false else { continue }
+            if let due = task.dueAt {
+                let startDue = cal.startOfDay(for: due)
+                if startDue == startToday {
+                    let key = WeekPlanner.isoDayKey(for: startToday)
+                    grouped[key, default: []].append(pair)
+                } else if startDue < startToday {
+                    // overdue goes to Today
+                    let key = WeekPlanner.isoDayKey(for: startToday)
+                    grouped[key, default: []].append(pair)
+                } else {
+                    // Future days Mon–Fri only
+                    let key = WeekPlanner.isoDayKey(for: startDue)
+                    grouped[key, default: []].append(pair)
+                }
+            }
+        }
+        tasksByDayKey = grouped
+    }
+
+    func toggleSectionCollapsed(for dayKey: String) {
+        var set = collapsedDayKeys
+        if set.contains(dayKey) { set.remove(dayKey) } else { set.insert(dayKey) }
+        collapsedDayKeys = set
+    }
+
+    func isSectionCollapsed(dayKey: String) -> Bool {
+        collapsedDayKeys.contains(dayKey)
+    }
+
+    func schedule(taskId: UUID, to targetDate: Date) async {
+        guard let idx = tasksWithLabels.firstIndex(where: { $0.0.id == taskId }) else { return }
+        var task = tasksWithLabels[idx].0
+        let cal = Calendar.current
+        let wasDueTime = task.dueHasTime
+        if wasDueTime, let currentDue = task.dueAt {
+            // Preserve time component
+            var comps = cal.dateComponents([.hour, .minute, .second], from: currentDue)
+            let base = cal.startOfDay(for: targetDate)
+            comps.year = cal.component(.year, from: base)
+            comps.month = cal.component(.month, from: base)
+            comps.day = cal.component(.day, from: base)
+            task.dueAt = cal.date(from: comps) ?? base
+        } else {
+            // Set to start of target day
+            task.dueAt = cal.startOfDay(for: targetDate)
+            task.dueHasTime = false
+        }
+        do {
+            try await taskUseCases.updateTask(task)
+            await fetchTasks(in: selectedBucket, showLoading: false)
+        } catch {
+            errorMessage = "Failed to reschedule: \(error.localizedDescription)"
+        }
     }
 }

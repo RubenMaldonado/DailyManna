@@ -20,6 +20,10 @@ final class FakeRemoteTasksRepository: RemoteTasksRepository {
     func fetchTasks(since lastSync: Date?) async throws -> [Task] {
         return sinceResponses[lastSync] ?? []
     }
+    func fetchTasks(since lastSync: Date?, bucketKey: String?, dueBy: Date?) async throws -> [Task] {
+        // Simple passthrough ignoring context for tests
+        return try await fetchTasks(since: lastSync)
+    }
 
     func updateTask(_ task: Task) async throws -> Task {
         updated.append(task)
@@ -50,6 +54,9 @@ final class FakeRemoteTasksRepository: RemoteTasksRepository {
         }
         return results
     }
+    func startRealtime(userId: UUID) async throws {}
+    func stopRealtime() async {}
+    func deleteAll(for userId: UUID) async throws {}
 }
 
 final class FakeRemoteLabelsRepository: RemoteLabelsRepository {
@@ -96,6 +103,31 @@ final class FakeRemoteLabelsRepository: RemoteLabelsRepository {
         }
         return results
     }
+    func fetchTaskLabelLinks(since lastSync: Date?) async throws -> [TaskLabelLink] { return [] }
+    func startRealtime(userId: UUID) async throws {}
+    func stopRealtime() async {}
+    func deleteAll(for userId: UUID) async throws {}
+    func link(_ link: TaskLabelLink) async throws {}
+    func unlink(taskId: UUID, labelId: UUID) async throws {}
 }
 
+
+final class FakeRemoteWorkingLogRepository: RemoteWorkingLogRepository {
+    var upserts: [WorkingLogItem] = []
+    var softDeleted: [UUID] = []
+    var hardDeleted: [UUID] = []
+    var sinceResponses: [Date?: [WorkingLogItem]] = [:]
+    func upsert(_ item: WorkingLogItem) async throws -> WorkingLogItem {
+        upserts.append(item)
+        var i = item
+        i.remoteId = i.remoteId ?? i.id
+        i.updatedAt = item.updatedAt.addingTimeInterval(1)
+        return i
+    }
+    func softDelete(id: UUID) async throws { softDeleted.append(id) }
+    func hardDelete(id: UUID) async throws { hardDeleted.append(id) }
+    func fetchItems(since lastSync: Date?) async throws -> [WorkingLogItem] { sinceResponses[lastSync] ?? [] }
+    func startRealtime(userId: UUID) async throws {}
+    func stopRealtime() async {}
+}
 

@@ -14,6 +14,7 @@ struct TaskComposerView: View {
     // Date/time selection state for sheet
     @State private var datePart: Date = Date()
     @State private var timePart: Date = Date()
+    @State private var includeTime: Bool = false
     // Labels and recurrence state
     @State private var selectedLabelIds: Set<UUID> = []
     @State private var allLabels: [Label] = []
@@ -54,31 +55,44 @@ struct TaskComposerView: View {
                         Text("Due Date").font(.headline)
                         DatePicker("", selection: $datePart, displayedComponents: [.date])
                             .datePickerStyle(.graphical)
-                        HStack {
-                            Text("Time")
-                            DatePicker("", selection: $timePart, displayedComponents: [.hourAndMinute])
+                        Toggle("Include time", isOn: $includeTime)
+                        if includeTime {
+                            HStack {
+                                Text("Time")
+                                DatePicker("", selection: $timePart, displayedComponents: [.hourAndMinute])
+                            }
                         }
                         HStack {
-                            Button("Clear") { draft.dueAt = nil; showDatePicker = false }
+                            Button("Clear") { draft.dueAt = nil; includeTime = false; showDatePicker = false }
                                 .buttonStyle(SecondaryButtonStyle(size: .small))
                             Spacer()
                             Button("Done") {
                                 let calendar = Calendar.current
-                                let dateComponents = calendar.dateComponents([.year, .month, .day], from: datePart)
-                                let timeComponents = calendar.dateComponents([.hour, .minute], from: timePart)
-                                var merged = DateComponents()
-                                merged.year = dateComponents.year
-                                merged.month = dateComponents.month
-                                merged.day = dateComponents.day
-                                merged.hour = timeComponents.hour
-                                merged.minute = timeComponents.minute
-                                if let combined = calendar.date(from: merged) { draft.dueAt = combined }
+                                var components = calendar.dateComponents([.year, .month, .day], from: datePart)
+                                if includeTime {
+                                    let timeComponents = calendar.dateComponents([.hour, .minute], from: timePart)
+                                    components.hour = timeComponents.hour
+                                    components.minute = timeComponents.minute
+                                } else {
+                                    // default no-time to noon for internal dueAt storage when needed for notifications display text
+                                    components.hour = 12
+                                    components.minute = 0
+                                }
+                                if let combined = calendar.date(from: components) {
+                                    draft.dueAt = combined
+                                    draft.dueHasTime = includeTime
+                                }
                                 showDatePicker = false
                             }
                             .buttonStyle(PrimaryButtonStyle(size: .small))
                         }
                     }
-                    .onAppear { let base = draft.dueAt ?? Date(); datePart = base; timePart = base }
+                    .onAppear {
+                        let base = draft.dueAt ?? Date()
+                        datePart = base
+                        timePart = Date()
+                        includeTime = draft.dueHasTime
+                    }
                     .padding()
                 }
                 #endif
@@ -131,45 +145,49 @@ struct TaskComposerView: View {
         .sheet(isPresented: $showDatePicker) {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Due Date").font(.headline)
-                // Graphical calendar for date only
                 DatePicker(
                     "",
                     selection: $datePart,
                     displayedComponents: [.date]
                 )
                 .datePickerStyle(.graphical)
-                // Time picker (wheel/compact) for time only
-                HStack {
-                    Text("Time")
-                    DatePicker(
-                        "",
-                        selection: $timePart,
-                        displayedComponents: [.hourAndMinute]
-                    )
-                    #if os(iOS)
-                    .datePickerStyle(.wheel)
-                    #endif
+                Toggle("Include time", isOn: $includeTime)
+                if includeTime {
+                    HStack {
+                        Text("Time")
+                        DatePicker(
+                            "",
+                            selection: $timePart,
+                            displayedComponents: [.hourAndMinute]
+                        )
+                        #if os(iOS)
+                        .datePickerStyle(.wheel)
+                        #endif
+                    }
                 }
                 HStack {
                     Button("Clear") {
                         draft.dueAt = nil
+                        draft.dueHasTime = true
+                        includeTime = false
                         showDatePicker = false
                     }
                     .buttonStyle(SecondaryButtonStyle(size: .small))
                     Spacer()
                     Button("Done") {
-                        // Combine date and time into a single Date
                         let calendar = Calendar.current
-                        let dateComponents = calendar.dateComponents([.year, .month, .day], from: datePart)
-                        let timeComponents = calendar.dateComponents([.hour, .minute], from: timePart)
-                        var merged = DateComponents()
-                        merged.year = dateComponents.year
-                        merged.month = dateComponents.month
-                        merged.day = dateComponents.day
-                        merged.hour = timeComponents.hour
-                        merged.minute = timeComponents.minute
-                        if let combined = calendar.date(from: merged) {
+                        var components = calendar.dateComponents([.year, .month, .day], from: datePart)
+                        if includeTime {
+                            let t = calendar.dateComponents([.hour, .minute], from: timePart)
+                            components.hour = t.hour
+                            components.minute = t.minute
+                        } else {
+                            components.hour = 12
+                            components.minute = 0
+                        }
+                        if let combined = calendar.date(from: components) {
                             draft.dueAt = combined
+                            draft.dueHasTime = includeTime
                         }
                         showDatePicker = false
                     }
@@ -179,7 +197,9 @@ struct TaskComposerView: View {
             .onAppear {
                 let base = draft.dueAt ?? Date()
                 datePart = base
-                timePart = base
+                timePart = Date()
+                includeTime = draft.dueHasTime
+                if draft.dueAt == nil { includeTime = false }
             }
             .padding()
             .presentationDetents([.medium])
@@ -277,25 +297,32 @@ struct TaskComposerView: View {
 
     private func dateChipText() -> (String, Bool) {
         guard let due = draft.dueAt else { return ("Date", false) }
+        let cal = Calendar.current
         let now = Date()
-        let isOverdue = due < now
+        // compute deadline (end of day if no time)
+        let deadline: Date = {
+            if draft.dueHasTime { return due }
+            let start = cal.startOfDay(for: due)
+            return cal.date(byAdding: .day, value: 1, to: start) ?? due
+        }()
+        let isOverdue = now >= deadline
         let timeFormatter = DateFormatter()
         timeFormatter.timeStyle = .short
         timeFormatter.dateStyle = .none
         timeFormatter.locale = Locale.current
-        let timeStr = timeFormatter.string(from: due)
-        let cal = Calendar.current
-        if cal.isDateInToday(due) { return ("Today \(timeStr)", isOverdue) }
-        if cal.isDateInTomorrow(due) { return ("Tomorrow \(timeStr)", false) }
+        let dayFormatter = DateFormatter()
+        dayFormatter.dateFormat = "EEE MMM d"
+        if cal.isDateInToday(due) {
+            return draft.dueHasTime ? ("Today \(timeFormatter.string(from: due))", isOverdue) : ("Today", isOverdue)
+        }
+        if cal.isDateInTomorrow(due) { return draft.dueHasTime ? ("Tomorrow \(timeFormatter.string(from: due))", false) : ("Tomorrow", false) }
         if let weekendRange = cal.nextWeekend(startingAfter: now) {
             if cal.isDate(due, inSameDayAs: weekendRange.start) || cal.isDate(due, inSameDayAs: weekendRange.end) {
-                return ("This weekend \(timeStr)", false)
+                return draft.dueHasTime ? ("This weekend \(timeFormatter.string(from: due))", false) : ("This weekend", false)
             }
         }
-        let df = DateFormatter()
-        df.dateFormat = "EEE MMM d"
-        let day = df.string(from: due)
-        return ("\(day) \(timeStr)", isOverdue)
+        let day = dayFormatter.string(from: due)
+        return draft.dueHasTime ? ("\(day) \(timeFormatter.string(from: due))", isOverdue) : (day, isOverdue)
     }
 
     private func recurrenceChipText() -> String {

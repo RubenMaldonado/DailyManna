@@ -79,6 +79,7 @@ final class Dependencies {
         registerSingleton(type: DataContainer.self) { dataContainer }
         registerSingleton(type: TasksRepository.self) { dataContainer.tasksRepository }
         registerSingleton(type: LabelsRepository.self) { dataContainer.labelsRepository }
+        registerSingleton(type: WorkingLogRepository.self) { dataContainer.workingLogRepository }
         registerSingleton(type: SyncStateStore.self) { dataContainer.syncStateStore }
         // Recurrences
         registerSingleton(type: RecurrencesRepository.self) { SwiftDataRecurrencesRepository(modelContext: ModelContext(dataContainer.modelContainer)) }
@@ -88,6 +89,7 @@ final class Dependencies {
         registerSingleton(type: RemoteTasksRepository.self) { SupabaseTasksRepository() }
         registerSingleton(type: RemoteLabelsRepository.self) { SupabaseLabelsRepository() }
         registerSingleton(type: SupabaseRecurrencesRepository.self) { SupabaseRecurrencesRepository() }
+        registerSingleton(type: RemoteWorkingLogRepository.self) { SupabaseWorkingLogRepository() }
         
         // Sync Service
         registerSingleton(type: SyncService.self) {
@@ -96,7 +98,9 @@ final class Dependencies {
                 remoteTasksRepository: try! self.resolve(type: RemoteTasksRepository.self),
                 localLabelsRepository: try! self.resolve(type: LabelsRepository.self),
                 remoteLabelsRepository: try! self.resolve(type: RemoteLabelsRepository.self),
-                syncStateStore: try! self.resolve(type: SyncStateStore.self)
+                syncStateStore: try! self.resolve(type: SyncStateStore.self),
+                localWorkingLogRepository: try! self.resolve(type: WorkingLogRepository.self),
+                remoteWorkingLogRepository: try! self.resolve(type: RemoteWorkingLogRepository.self)
             )
         }
         
@@ -117,6 +121,9 @@ final class Dependencies {
                 local: try! self.resolve(type: RecurrencesRepository.self),
                 remote: try! self.resolve(type: SupabaseRecurrencesRepository.self)
             )
+        }
+        registerSingleton(type: WorkingLogUseCases.self) {
+            try! WorkingLogUseCases(repository: self.resolve(type: WorkingLogRepository.self))
         }
         
         Logger.shared.info("Dependency injection configured successfully", category: .general)

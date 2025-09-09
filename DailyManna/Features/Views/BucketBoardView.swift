@@ -11,10 +11,17 @@ import UniformTypeIdentifiers
 struct BucketBoardView: View {
     @ObservedObject var viewModel: TaskListViewModel
     @Environment(\.dismiss) private var dismiss
+    @StateObject private var workingLogVM: WorkingLogPanelViewModel
+
+    init(viewModel: TaskListViewModel) {
+        self.viewModel = viewModel
+        _workingLogVM = StateObject(wrappedValue: WorkingLogPanelViewModel(userId: viewModel.userId))
+    }
     
     var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: Spacing.medium) {
+        HStack(spacing: 0) {
+            ScrollView(.horizontal) {
+                HStack(spacing: Spacing.medium) {
                 if let t = viewModel.pendingDelete {
                     Banner(kind: .warning, message: "\"\(t.title)\" will be moved to trash.")
                         .frame(maxWidth: .infinity)
@@ -52,21 +59,32 @@ struct BucketBoardView: View {
                         onDelete: { task in viewModel.confirmDelete(task) }
                     )
                 }
+                }
+                .padding()
             }
-            .padding()
+            if workingLogVM.isOpen {
+                Divider()
+                WorkingLogPanelView(viewModel: workingLogVM)
+                    .frame(width: 360)
+            }
         }
         .navigationTitle("Board")
         .navigationBarBackButtonHidden(true)
+        #if os(iOS)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button(action: {
-                    // Ensure list view shows the current bucket-filtered data when returning
                     _Concurrency.Task { await viewModel.fetchTasks(in: viewModel.selectedBucket) }
                     dismiss()
                 }) { SwiftUI.Label("Back", systemImage: "chevron.left") }
                 .buttonStyle(SecondaryButtonStyle(size: .small))
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { workingLogVM.toggleOpen() } label: { SwiftUI.Label("Working Log", systemImage: workingLogVM.isOpen ? "sidebar.right" : "sidebar.right") }
+                    .buttonStyle(SecondaryButtonStyle(size: .small))
+            }
         }
+        #endif
         .onAppear {
             viewModel.isBoardModeActive = true
         }

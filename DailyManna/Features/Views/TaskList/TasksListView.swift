@@ -16,6 +16,7 @@ struct TasksListView: View {
     @State private var isDragActive: Bool = false
     var body: some View {
         ScrollView { LazyVStack(spacing: 12) { content } }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .coordinateSpace(name: "listDrop")
         #if os(macOS)
         // macOS path uses dropDestination for simplicity to avoid cross-file delegate type dependency

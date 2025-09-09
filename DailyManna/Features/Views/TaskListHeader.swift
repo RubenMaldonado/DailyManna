@@ -10,6 +10,7 @@ struct TaskListHeader: View {
     let onSelectBucket: (TimeBucket) -> Void
     let onOpenFilter: () -> Void
     let activeFilterCount: Int
+    let onOpenSettings: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -18,6 +19,7 @@ struct TaskListHeader: View {
                 SyncStatusView(isSyncing: isSyncing)
             }
             Spacer()
+            #if os(macOS)
             if showBucketMenu {
                 Menu {
                     ForEach(TimeBucket.allCases.sorted { $0.sortOrder < $1.sortOrder }) { bucket in
@@ -30,6 +32,7 @@ struct TaskListHeader: View {
                 }
                 .menuStyle(.borderlessButton)
             }
+            #endif
             Button(action: onOpenFilter) {
                 HStack(spacing: 6) {
                     Image(systemName: "line.3.horizontal.decrease.circle")
@@ -42,7 +45,7 @@ struct TaskListHeader: View {
                 .buttonStyle(SecondaryButtonStyle(size: .small))
             Button(action: onNew) { SwiftUI.Label("New", systemImage: "plus") }
                 .buttonStyle(PrimaryButtonStyle(size: .small))
-            Button(action: { /* settings from parent */ }) { Image(systemName: "gearshape") }
+            Button(action: onOpenSettings) { Image(systemName: "gearshape") }
                 .buttonStyle(SecondaryButtonStyle(size: .small))
         }
         .padding(.horizontal, Spacing.medium)
@@ -77,7 +80,8 @@ struct SyncStatusView: View {
         showBucketMenu: true,
         onSelectBucket: { _ in },
         onOpenFilter: {},
-        activeFilterCount: 2
+        activeFilterCount: 2,
+        onOpenSettings: {}
     )
     .background(Colors.background)
 }

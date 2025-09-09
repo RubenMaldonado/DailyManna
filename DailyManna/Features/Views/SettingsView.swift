@@ -19,6 +19,8 @@ final class SettingsViewModel: ObservableObject {
     private let remoteTasksRepository: RemoteTasksRepository
     private let remoteLabelsRepository: RemoteLabelsRepository
     private let syncService: SyncService
+    private let workingLogRepository: WorkingLogRepository = try! Dependencies.shared.resolve(type: WorkingLogRepository.self)
+    private let remoteWorkingLogRepository: RemoteWorkingLogRepository = try! Dependencies.shared.resolve(type: RemoteWorkingLogRepository.self)
     private let recurrenceUseCases: RecurrenceUseCases = try! Dependencies.shared.resolve(type: RecurrenceUseCases.self)
     #if DEBUG
     @Published var isSoakRunning: Bool = false
@@ -114,6 +116,28 @@ final class SettingsViewModel: ObservableObject {
         isWorking = false
     }
 
+    func hardDeleteWorkingLogItemsPermanently() async {
+        guard !isWorking else { return }
+        isWorking = true
+        statusMessage = "Hard deleting Working Log items…"
+        do {
+            // Fetch soft-deleted items and delete them hard both locally and remotely
+            // Since local repo does not expose fetching soft-deleted directly, we use purge path after remote delete by time horizon
+            // For safety, delete remotely any items marked deleted locally
+            let needingSync = try await workingLogRepository.fetchNeedingSync(for: userId)
+            for item in needingSync where item.deletedAt != nil {
+                try await remoteWorkingLogRepository.hardDelete(id: item.id)
+                try await workingLogRepository.deleteHard(id: item.id)
+            }
+            // As a catch-all, purge any remaining soft-deleted older than now
+            try await workingLogRepository.purgeSoftDeleted(olderThan: Date())
+            statusMessage = "Working Log items hard-deleted"
+        } catch {
+            statusMessage = "Failed: \(error.localizedDescription)"
+        }
+        isWorking = false
+    }
+
     /// Clears local SwiftData (tasks, labels, junctions) and checkpoints, then performs a pull-only sync
     func resetLocalToServer() async {
         guard !isWorking else { return }
@@ -170,12 +194,14 @@ struct SettingsView: View {
     @StateObject var viewModel: SettingsViewModel
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var authService: AuthenticationService
+    @AppStorage("appearance") private var appearance: String = "system"
+    @AppStorage("dueNotificationsEnabled") private var dueNotificationsEnabled: Bool = false
     
     var body: some View {
         NavigationStack {
             Form {
                 Section("Appearance") {
-                    Picker("Theme", selection: Binding(get: { UserDefaults.standard.string(forKey: "appearance") ?? "system" }, set: { UserDefaults.standard.set($0, forKey: "appearance") })) {
+                    Picker("Theme", selection: $appearance) {
                         Text("System").tag("system")
                         Text("Light").tag("light")
                         Text("Dark").tag("dark")
@@ -184,6 +210,7 @@ struct SettingsView: View {
                 }
                 Section("Features") {
                     Toggle("Enable Subtasks & Rich Descriptions", isOn: $viewModel.featureSubtasksEnabled)
+                    NavigationLink("Keyboard Shortcuts") { KeyboardShortcutsView() }
                 }
                 #if DEBUG
                 Section("Testing") {
@@ -197,7 +224,7 @@ struct SettingsView: View {
                 }
                 #endif
                 Section("Reminders") {
-                    Toggle("Due date notifications", isOn: Binding(get: { UserDefaults.standard.bool(forKey: "dueNotificationsEnabled") }, set: { UserDefaults.standard.set($0, forKey: "dueNotificationsEnabled") }))
+                    Toggle("Due date notifications", isOn: $dueNotificationsEnabled)
                     if #available(iOS 15.0, *) {
                         Button("Request Permission") {
                             _Concurrency.Task { await NotificationsManager.requestAuthorizationIfNeeded() }
@@ -224,6 +251,14 @@ struct SettingsView: View {
                         Text("Reset LOCAL to SERVER (pull-only)")
                     }
                     .buttonStyle(SecondaryButtonStyle(size: .small))
+                    .disabled(viewModel.isWorking)
+
+                    Button(role: .destructive) {
+                        _Concurrency.Task { await viewModel.hardDeleteWorkingLogItemsPermanently() }
+                    } label: {
+                        Text("Hard delete soft-deleted Working Log items")
+                    }
+                    .buttonStyle(DestructiveButtonStyle())
                     .disabled(viewModel.isWorking)
                 }
                 Section("Generators") {

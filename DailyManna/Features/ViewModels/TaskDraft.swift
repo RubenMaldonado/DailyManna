@@ -14,16 +14,18 @@ struct TaskDraft: Identifiable, Equatable {
     var title: String
     var description: String?
     var dueAt: Date?
+    var dueHasTime: Bool = true
     var priority: TaskPriority = .normal
     var reminders: [Date] = []
     
-    init(id: UUID = UUID(), userId: UUID, bucket: TimeBucket, title: String = "", description: String? = nil, dueAt: Date? = nil, priority: TaskPriority = .normal, reminders: [Date] = []) {
+    init(id: UUID = UUID(), userId: UUID, bucket: TimeBucket, title: String = "", description: String? = nil, dueAt: Date? = nil, dueHasTime: Bool = true, priority: TaskPriority = .normal, reminders: [Date] = []) {
         self.id = id
         self.userId = userId
         self.bucket = bucket
         self.title = title
         self.description = description
         self.dueAt = dueAt
+        self.dueHasTime = dueHasTime
         self.priority = priority
         self.reminders = reminders
     }
@@ -31,11 +33,11 @@ struct TaskDraft: Identifiable, Equatable {
 
 extension TaskDraft {
     init(from task: Task) {
-        self.init(id: task.id, userId: task.userId, bucket: task.bucketKey, title: task.title, description: task.description, dueAt: task.dueAt, priority: task.priority, reminders: task.reminders ?? [])
+        self.init(id: task.id, userId: task.userId, bucket: task.bucketKey, title: task.title, description: task.description, dueAt: task.dueAt, dueHasTime: task.dueHasTime, priority: task.priority, reminders: task.reminders ?? [])
     }
     
     func toNewTask() -> Task {
-        Task(userId: userId, bucketKey: bucket, title: title.trimmingCharacters(in: .whitespacesAndNewlines), description: description?.trimmingCharacters(in: .whitespacesAndNewlines), dueAt: dueAt, priority: priority, reminders: reminders)
+        Task(userId: userId, bucketKey: bucket, title: title.trimmingCharacters(in: .whitespacesAndNewlines), description: description?.trimmingCharacters(in: .whitespacesAndNewlines), dueAt: dueAt, dueHasTime: dueHasTime, priority: priority, reminders: reminders)
     }
     
     func applying(to task: Task) -> Task {
@@ -43,6 +45,7 @@ extension TaskDraft {
         updated.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.description = description?.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.dueAt = dueAt
+        updated.dueHasTime = dueHasTime
         updated.bucketKey = bucket
         updated.priority = priority
         updated.reminders = reminders

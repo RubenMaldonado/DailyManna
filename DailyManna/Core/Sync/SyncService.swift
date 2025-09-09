@@ -19,6 +19,8 @@ final class SyncService: ObservableObject {
     private let localLabelsRepository: LabelsRepository
     private let remoteLabelsRepository: RemoteLabelsRepository
     private let syncStateStore: SyncStateStore
+    private let localWorkingLogRepository: WorkingLogRepository
+    private let remoteWorkingLogRepository: RemoteWorkingLogRepository
     private var realtimeObserver: NSObjectProtocol?
     private var realtimeDebounceScheduled = false
     private var currentUserId: UUID?
@@ -41,13 +43,17 @@ final class SyncService: ObservableObject {
         remoteTasksRepository: RemoteTasksRepository,
         localLabelsRepository: LabelsRepository,
         remoteLabelsRepository: RemoteLabelsRepository,
-        syncStateStore: SyncStateStore
+        syncStateStore: SyncStateStore,
+        localWorkingLogRepository: WorkingLogRepository,
+        remoteWorkingLogRepository: RemoteWorkingLogRepository
     ) {
         self.localTasksRepository = localTasksRepository
         self.remoteTasksRepository = remoteTasksRepository
         self.localLabelsRepository = localLabelsRepository
         self.remoteLabelsRepository = remoteLabelsRepository
         self.syncStateStore = syncStateStore
+        self.localWorkingLogRepository = localWorkingLogRepository
+        self.remoteWorkingLogRepository = remoteWorkingLogRepository
     }
 
     /// Updates the current view context used to trim remote deltas during sync
@@ -103,6 +109,14 @@ final class SyncService: ObservableObject {
                 guard let self else { return }
                 _ = await Logger.shared.time("recurrenceCatchUp") {
                     await self.catchUpRecurrencesIfNeeded(userId: userId)
+                }
+            }
+
+            // Working Log
+            try await withRetry { [weak self] in
+                guard let self else { return }
+                _ = try await Logger.shared.time("syncWorkingLog") {
+                    try await self.syncWorkingLog(userId: userId)
                 }
             }
             
@@ -193,6 +207,50 @@ final class SyncService: ObservableObject {
         // Update checkpoint using server-sourced timestamps to avoid device clock skew
         if let maxServerUpdated = remoteTasks.map({ $0.updatedAt }).max() {
             try await syncStateStore.updateTasksCheckpoint(userId: userId, to: maxServerUpdated)
+        }
+    }
+
+    // MARK: - Working Log
+    private func syncWorkingLog(userId: UUID) async throws {
+        // Push local changes
+        let pending = (try? await localWorkingLogRepository.fetchNeedingSync(for: userId)) ?? []
+        for item in pending {
+            if item.deletedAt == nil {
+                let synced = try await remoteWorkingLogRepository.upsert(item)
+                var updated = synced
+                updated.needsSync = false
+                try await localWorkingLogRepository.update(updated)
+            } else {
+                // Soft delete remotely as well
+                try await remoteWorkingLogRepository.softDelete(id: item.id)
+                var updated = item
+                updated.needsSync = false
+                try await localWorkingLogRepository.update(updated)
+            }
+        }
+        
+        // Pull remote changes (delta)
+        let checkpoints = try await syncStateStore.loadSnapshot(userId: userId)
+        let since = checkpoints?.lastLabelsSyncAt ?? lastSyncDate // reuse labels checkpoint to avoid schema change
+        let remoteItems = try await remoteWorkingLogRepository.fetchItems(since: since)
+        if !remoteItems.isEmpty {
+            for remote in remoteItems {
+                if let existing = try await localWorkingLogRepository.fetch(by: remote.id) {
+                    if remote.updatedAt > existing.updatedAt {
+                        var updated = remote
+                        updated.needsSync = false
+                        try await localWorkingLogRepository.update(updated)
+                    }
+                } else {
+                    var newItem = remote
+                    newItem.needsSync = false
+                    try await localWorkingLogRepository.create(newItem)
+                }
+            }
+        }
+        if let maxServerUpdated = remoteItems.map({ $0.updatedAt }).max() {
+            // Piggyback on labels checkpoint to avoid expanding SyncStateEntity now
+            try await syncStateStore.updateLabelsCheckpoint(userId: userId, to: maxServerUpdated)
         }
     }
     

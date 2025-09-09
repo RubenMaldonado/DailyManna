@@ -7,6 +7,20 @@ enum TelemetryEvent: String {
     case filterClear
     case viewSwitch
     case bucketChange
+    // This Week
+    case thisWeekViewShown
+    case taskRescheduledDrag
+    case taskRescheduledQuickAction
+    case thisWeekSectionToggle
+    // Working Log
+    case workingLogOpened
+    case workingLogDayToggled
+    case workingLogItemCreated
+    case workingLogItemEdited
+    case workingLogItemDeleted
+    case taskCompletedMovedToWorkingLog
+    case taskCompletedUndo
+    case workingLogExportMarkdown
 }
 
 enum Telemetry {

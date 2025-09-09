@@ -15,6 +15,7 @@ struct TaskFormView: View {
     let onCancel: () -> Void
     @State private var hasDueDate: Bool = false
     @State private var dueDate: Date = Date()
+    @State private var includeTime: Bool = false
     @EnvironmentObject private var authService: AuthenticationService
     @State private var selectedLabels: Set<UUID> = []
     @State private var isDescriptionPreview: Bool = false
@@ -35,8 +36,9 @@ struct TaskFormView: View {
                 Section("Scheduling") {
                     Toggle("Has due date", isOn: $hasDueDate)
                     if hasDueDate {
-                        DatePicker("Due Date", selection: $dueDate, displayedComponents: [.date, .hourAndMinute])
+                        DatePicker("Due Date", selection: $dueDate, displayedComponents: includeTime ? [.date, .hourAndMinute] : [.date])
                             .environment(\.locale, Locale.current)
+                        Toggle("Include time", isOn: $includeTime)
                     }
                     Picker("Bucket", selection: $draft.bucket) {
                         ForEach(TimeBucket.allCases.sorted { $0.sortOrder < $1.sortOrder }) { bucket in
@@ -97,7 +99,22 @@ struct TaskFormView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        draft.dueAt = hasDueDate ? dueDate : nil
+                        if hasDueDate {
+                            if includeTime {
+                                draft.dueAt = dueDate
+                                draft.dueHasTime = true
+                            } else {
+                                // Store date with 12:00 for notification default; but mark as date-only
+                                var comps = Calendar.current.dateComponents([.year, .month, .day], from: dueDate)
+                                comps.hour = 12
+                                comps.minute = 0
+                                draft.dueAt = Calendar.current.date(from: comps)
+                                draft.dueHasTime = false
+                            }
+                        } else {
+                            draft.dueAt = nil
+                            draft.dueHasTime = true
+                        }
                         // Post selected label IDs so the view model can persist them
                         NotificationCenter.default.post(name: Notification.Name("dm.taskform.labels.selection"), object: nil, userInfo: [
                             "taskId": draft.id,
@@ -119,7 +136,12 @@ struct TaskFormView: View {
             }
             .onAppear {
                 hasDueDate = draft.dueAt != nil
-                dueDate = draft.dueAt ?? Date()
+                includeTime = draft.dueHasTime && draft.dueAt != nil
+                if let due = draft.dueAt {
+                    dueDate = due
+                } else {
+                    dueDate = Date()
+                }
                 _Concurrency.Task {
                     let deps = Dependencies.shared
                     if isEditing {

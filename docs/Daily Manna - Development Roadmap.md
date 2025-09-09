@@ -362,6 +362,74 @@ This document outlines a prioritized, iterative development approach for Daily M
 - Submit path reliable; drafts persist; keyboard flow strong on macOS.
 - Tests green; no regressions; telemetry dashboards show usage.
 
+### Epic 2.6: Working Log (Right Panel)
+**Priority**: Medium-High
+**Estimated Effort**: 2 weeks
+**Goal**: Provide a right-side Working Log panel that automatically groups completed tasks by day and supports lightweight “Working Log Items” (notes), with filtering and Markdown export.
+
+**User Stories**:
+- As a user, I can open a right-side Working Log panel to review my day.
+- As a user, when I mark a task complete, it moves to the Working Log after a 5s Undo window.
+- As a user, I can add/edit/delete non-task Working Log Items (title, description, date required).
+- As a user, I can search titles/descriptions and filter by date range (default last 30 days).
+- As a user, I can edit a completed task’s completion date inside the Working Log.
+- As a user, I can collapse older days and persist collapse per device.
+- As a user, I can export a date range of my Working Log to Markdown.
+
+**Acceptance Criteria**:
+- Right-side panel toggles from the board header; open/closed state persists per device.
+- Completed tasks appear grouped by local day using `completedAt`; items newest-first.
+- 5s Undo toast on completion; no Undo → task appears; Undo → task reverts and does not appear.
+- Working Log Items require title, description, date; appear only in Working Log with distinct styling.
+- Search matches case/diacritic-insensitive across titles/descriptions for tasks and log items.
+- Default view shows last 30 days; user can load older or set custom range.
+- Editing `completedAt` allowed only for completed tasks and only inside the Working Log; future dates disallowed.
+- Deleting a Working Log Item performs soft delete; Settings offers a user-triggered hard delete for soft-deleted items.
+- Export produces Markdown grouped by day with separate Task and Log Item sections and timestamps.
+
+**Implementation Plan**
+- Database & RLS
+  - Add `working_log_items` table: `id uuid pk`, `user_id uuid`, `title text`, `description text`, `occurred_at timestamptz`, `created_at timestamptz default now()`, `updated_at timestamptz default now()`, `deleted_at timestamptz null`.
+  - RLS: enable; policy `user_id = auth.uid()` for select/insert/update/delete; soft delete sets `deleted_at`.
+  - Indexes: `(user_id, occurred_at desc)`, `(user_id, deleted_at)`; updated_at trigger; Realtime publication enabled.
+- Local Storage (SwiftData)
+  - Create `WorkingLogItemEntity` mirroring remote fields including `deletedAt` tombstone.
+  - Migration to add entity; helpers for grouping by local day.
+- Repositories & Sync
+  - Local: `SwiftDataWorkingLogRepository` with CRUD, soft delete, hard delete.
+  - Remote: `SupabaseWorkingLogRepository` with DTOs and delta upsert; exclude `deleted_at` by default.
+  - Sync: extend `SyncService` to push/pull `working_log_items`; include tasks’ `completedAt` in grouping; last-write-wins.
+- UI
+  - Panel: `WorkingLogPanelView` docked right of board; header toggle in board header; per-device open state.
+  - Sections: day headers (Today/Yesterday/Weekday, Mon DD), collapsible with persisted state.
+  - Items: reuse `TaskCard` for tasks; `WorkingLogItemCard` for notes with distinct surface color and note icon.
+  - Controls: Add Log Item, search (title+description), date range (Today/7/30/Custom), Export Markdown.
+  - Edit `completedAt` for completed tasks via context menu/detail within panel; validate non-future.
+- Behavior
+  - Completion: 5s Undo toast; on timeout, move task to Working Log; cancel if toggled back before timeout.
+  - Deletion: soft delete by default; Settings provides user-controlled hard delete action.
+- Settings
+  - Add “Hard delete Working Log items” action with confirmation; no auto-retention.
+- Telemetry
+  - Events: `working_log_opened`, `working_log_day_toggled`, `working_log_item_created/edited/deleted`, `task_completed_moved_to_working_log`, `task_completed_undo`, `working_log_export_markdown`.
+- Testing & Perf
+  - Unit: repos CRUD, grouping, search normalization, undo behavior, date edit validation.
+  - Integration: RLS policies, delta sync, Realtime hints; pagination for >30 days.
+  - UI: panel interactions, collapse persistence, export.
+
+**Milestones (est. 2 weeks)**
+- Days 1–2: DB schema/RLS/index/realtime plan; SwiftData entity/migration; DTOs.
+- Days 3–4: Repositories (local/remote); SyncService delta; tests.
+- Days 5–7: Panel UI, day sections, search/date filters, item cards.
+- Days 8–9: Completion Undo flow; edit `completedAt` UI; Settings hard delete.
+- Day 10: Export Markdown; telemetry; perf/accessibility pass; docs & feature flag.
+
+**Definition of Done**
+- Panel shipped with 30-day default view, collapse per device, search/date filters.
+- Tasks auto-move with 5s undo; `completedAt` editable only in panel; validation enforced.
+- Working Log Items CRUD with soft delete; optional hard delete from Settings.
+- Sync, RLS, and Realtime verified; export to Markdown works; tests green; docs published.
+
 ---
 
 ## Phase 3: Advanced Features & Polish (Weeks 15-20)
