@@ -40,6 +40,26 @@ final class TaskListViewModelSectionsTests: XCTestCase {
         XCTAssertEqual(up.hour, 15)
         XCTAssertEqual(up.minute, 30)
     }
+
+    func testUnscheduleClearsDueDate() async throws {
+        let vm = try makeViewModel()
+        vm.featureThisWeekSectionsEnabled = true
+        let user = vm.userId
+        // Create a task with a due date in This Week
+        let cal = Calendar.current
+        let due = cal.date(byAdding: .day, value: 1, to: Date())!
+        var task = Task(userId: user, bucketKey: .thisWeek, title: "T2", dueAt: due, dueHasTime: false)
+        let repo: TasksRepository = try Dependencies.shared.resolve(type: TasksRepository.self)
+        try await repo.createTask(task)
+        // Wire VM list
+        await vm.fetchTasks(in: .thisWeek)
+        // Act
+        await vm.unschedule(taskId: task.id)
+        let updated = try await repo.fetchTask(by: task.id)
+        XCTAssertNotNil(updated)
+        XCTAssertNil(updated!.dueAt)
+        XCTAssertEqual(updated!.bucketKey, .thisWeek)
+    }
 }
 
 

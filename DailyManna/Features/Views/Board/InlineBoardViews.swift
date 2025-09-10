@@ -2,6 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 #if os(macOS)
+private enum BoardMetrics { static let columnWidth: CGFloat = 480 }
 struct InlineBoardView: View {
     @ObservedObject var viewModel: TaskListViewModel
     private var buckets: [TimeBucket] { TimeBucket.allCases.sorted { $0.sortOrder < $1.sortOrder } }
@@ -17,6 +18,7 @@ struct InlineBoardView: View {
                             isSectionCollapsed: { key in viewModel.isSectionCollapsed(dayKey: key) },
                             toggleSectionCollapsed: { key in viewModel.toggleSectionCollapsed(for: key) },
                             schedule: { id, date in _Concurrency.Task { await viewModel.schedule(taskId: id, to: date) } },
+                            unschedule: { id in _Concurrency.Task { await viewModel.unschedule(taskId: id) } },
                             onMoveBucket: { taskId, dest in _Concurrency.Task { await viewModel.move(taskId: taskId, to: dest, refreshIn: nil) } },
                             onEdit: { task in viewModel.presentEditForm(task: task) },
                             onDelete: { task in viewModel.confirmDelete(task) },
@@ -120,6 +122,7 @@ struct InlineStandardBucketColumn: View {
         .surfaceStyle(.content)
         .cornerRadius(12)
         .coordinateSpace(name: "columnDrop")
+        .frame(width: BoardMetrics.columnWidth)
         .onDrop(of: [UTType.plainText], delegate: InlineColumnDropDelegate(
             tasksWithLabels: tasksWithLabels,
             rowFramesProvider: { rowFrames },
@@ -141,6 +144,7 @@ struct InlineThisWeekColumn: View {
     let isSectionCollapsed: (String) -> Bool
     let toggleSectionCollapsed: (String) -> Void
     let schedule: (UUID, Date) -> Void
+    let unschedule: (UUID) -> Void
     let onMoveBucket: (UUID, TimeBucket) -> Void
     let onEdit: (Task) -> Void
     let onDelete: (Task) -> Void
@@ -159,6 +163,7 @@ struct InlineThisWeekColumn: View {
                     ForEach(sections, id: \.id) { section in
                         sectionView(section)
                     }
+                    unplannedSection
                 }
             }
         }
@@ -166,6 +171,7 @@ struct InlineThisWeekColumn: View {
         .padding(.vertical, Spacing.small)
         .surfaceStyle(.content)
         .cornerRadius(12)
+        .frame(width: BoardMetrics.columnWidth)
     }
 
     @ViewBuilder
@@ -215,6 +221,83 @@ struct InlineThisWeekColumn: View {
             let startDue = cal.startOfDay(for: due)
             if section.isToday { return startDue <= startToday }
             return startDue == section.date
+        }
+    }
+
+    // MARK: - Unplanned section
+    private var unplannedItems: [(Task, [Label])] {
+        let cal = Calendar.current
+        let now = Date()
+        let monday = WeekPlanner.mondayOfCurrentWeek(for: now, calendar: cal)
+        let friday = WeekPlanner.fridayOfCurrentWeek(for: now, calendar: cal)
+        return tasksWithLabels.filter { pair in
+            let t = pair.0
+            guard t.bucketKey == .thisWeek, t.isCompleted == false else { return false }
+            guard let due = t.dueAt else { return true }
+            let startDue = cal.startOfDay(for: due)
+            // Include due dates outside current weekday window (Mon..Fri inclusive)
+            return !(startDue >= monday && startDue <= friday)
+        }
+    }
+
+    @ViewBuilder
+    private var unplannedSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+            HStack {
+                Button(action: { toggleSectionCollapsed("unplanned") }) {
+                    Image(systemName: isSectionCollapsed("unplanned") ? "chevron.right" : "chevron.down")
+                }
+                .buttonStyle(.plain)
+                Image(systemName: "tray.slash")
+                    .foregroundColor(Colors.onSurface)
+                Text("Unplanned")
+                    .style(Typography.title3)
+                    .foregroundColor(Colors.onSurface)
+                Spacer()
+            }
+            .padding(.horizontal, Spacing.xSmall)
+
+            if isSectionCollapsed("unplanned") == false {
+                let items = unplannedItems
+                if items.isEmpty {
+                    Text("No unplanned tasks")
+                        .style(Typography.body)
+                        .foregroundColor(Colors.onSurfaceVariant)
+                        .padding(.horizontal, Spacing.xSmall)
+                        .padding(.vertical, Spacing.small)
+                } else {
+                    ForEach(items, id: \.0.id) { pair in
+                        TaskCard(
+                            task: pair.0,
+                            labels: pair.1,
+                            onToggleCompletion: { onToggle(pair.0) },
+                            subtaskProgress: subtaskProgressByParent[pair.0.id],
+                            showsRecursIcon: tasksWithRecurrence.contains(pair.0.id),
+                            onPauseResume: { onPauseResume(pair.0.id) },
+                            onSkipNext: { onSkipNext(pair.0.id) },
+                            onGenerateNow: { onGenerateNow(pair.0.id) }
+                        )
+                        .contextMenu {
+                            Menu("Schedule") {
+                                ForEach(sections, id: \.id) { sec in
+                                    Button(sec.isToday ? "Today" : sec.title) { schedule(pair.0.id, sec.date) }
+                                }
+                            }
+                            Button("Clear Due Date") { unschedule(pair.0.id) }
+                            Button("Edit") { onEdit(pair.0) }
+                            Button(role: .destructive) { onDelete(pair.0) } label: { Text("Delete") }
+                        }
+                        .onTapGesture(count: 2) { onEdit(pair.0) }
+                        .draggable(DraggableTaskID(id: pair.0.id))
+                        .padding(.horizontal, Spacing.xSmall)
+                    }
+                }
+            }
+        }
+        .dropDestination(for: DraggableTaskID.self) { items, _ in
+            guard let item = items.first else { return false }
+            unschedule(item.id)
+            return true
         }
     }
 

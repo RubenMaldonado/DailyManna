@@ -158,6 +158,7 @@ final class TaskListViewModel: ObservableObject {
             let endOfTodayLocal = availableOnlyLocal ? self.availableCutoffEndOfToday() : nil
             let (pairs, idSetsByTask) = await _Concurrency.Task.detached(priority: _Concurrency.TaskPriority.userInitiated) { () -> ([(Task, [Label])], [UUID: Set<UUID>]) in
                 var working = rawPairs
+                let showCompletedLocal = await self.showCompleted
                 // Helper to compute effective due (date-only as end-of-day)
                 func effectiveDue(_ t: Task) -> Date? {
                     guard let due = t.dueAt else { return nil }
@@ -165,6 +166,10 @@ final class TaskListViewModel: ObservableObject {
                     let cal = Calendar.current
                     let start = cal.startOfDay(for: due)
                     return cal.date(byAdding: .day, value: 1, to: start) ?? due
+                }
+                // Exclude completed tasks unless explicitly showing them
+                if showCompletedLocal == false {
+                    working = working.filter { pair in pair.0.isCompleted == false }
                 }
                 // Optional sort by due date
                 if sortByDueLocal {
@@ -398,6 +403,8 @@ final class TaskListViewModel: ObservableObject {
             }
             await refreshCounts()
             await fetchTasks(in: filter, showLoading: false)
+            // Notify working log to refresh if open
+            NotificationCenter.default.post(name: Notification.Name("dm.task.completed.changed"), object: nil, userInfo: ["taskId": task.id])
             // If this task just became completed and has a recurrence, generate the next instance
             if wasCompleted == false {
                 await generateNextInstanceIfRecurring(templateTaskId: task.id)
@@ -811,9 +818,24 @@ final class TaskListViewModel: ObservableObject {
         }
         do {
             try await taskUseCases.updateTask(task)
-            await fetchTasks(in: selectedBucket, showLoading: false)
+            await fetchTasks(in: isBoardModeActive ? nil : selectedBucket, showLoading: false)
         } catch {
             errorMessage = "Failed to reschedule: \(error.localizedDescription)"
+        }
+    }
+
+    /// Clear the due date for a task (unschedule). Keeps it in the same bucket.
+    func unschedule(taskId: UUID) async {
+        guard let idx = tasksWithLabels.firstIndex(where: { $0.0.id == taskId }) else { return }
+        var task = tasksWithLabels[idx].0
+        task.dueAt = nil
+        task.dueHasTime = false
+        do {
+            try await taskUseCases.updateTask(task)
+            await NotificationsManager.cancelDueNotification(taskId: task.id)
+            await fetchTasks(in: isBoardModeActive ? nil : selectedBucket, showLoading: false)
+        } catch {
+            errorMessage = "Failed to clear due date: \(error.localizedDescription)"
         }
     }
 }

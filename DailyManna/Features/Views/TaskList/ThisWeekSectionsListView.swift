@@ -85,6 +85,42 @@ struct ThisWeekSectionsListView: View {
                         if inside == false { insertBeforeIdByDay[section.id] = nil; showEndIndicatorByDay[section.id] = false }
                     }
                 }
+                // Unplanned Section
+                Section(header: unplannedHeader) {
+                    if viewModel.isSectionCollapsed(dayKey: "unplanned") == false {
+                        let items = unplannedItems()
+                        if items.isEmpty {
+                            Text("No unplanned tasks")
+                                .style(Typography.body)
+                                .foregroundColor(Colors.onSurfaceVariant)
+                                .padding(.horizontal)
+                                .padding(.vertical, Spacing.small)
+                        } else {
+                            ForEach(items, id: \.0.id) { pair in
+                                TaskCard(task: pair.0, labels: pair.1, onToggleCompletion: { onToggle(pair.0) })
+                                    .contextMenu {
+                                        Menu("Schedule") {
+                                            ForEach(viewModel.thisWeekSections, id: \.id) { sec in
+                                                Button(sec.isToday ? "Today" : sec.title) { _Concurrency.Task { await viewModel.schedule(taskId: pair.0.id, to: sec.date) } }
+                                            }
+                                        }
+                                        Button("Clear Due Date") { _Concurrency.Task { await viewModel.unschedule(taskId: pair.0.id) } }
+                                        Button("Edit") { onEdit(pair.0) }
+                                        Button(role: .destructive) { onDelete(pair.0) } label: { Text("Delete") }
+                                    }
+                                    .onTapGesture(count: 2) { onEdit(pair.0) }
+                            }
+                        }
+                    }
+                }
+                .coordinateSpace(name: "unplanned")
+                .dropDestination(for: DraggableTaskID.self) { items, _ in
+                    guard let item = items.first else { return false }
+                    _Concurrency.Task { await viewModel.unschedule(taskId: item.id) }
+                    return true
+                } isTargeted: { inside in
+                    isDragActive = inside
+                }
             }
             .onPreferenceChange(ThisWeekRowFramePreferenceKey.self) { value in
                 rowFrames.merge(value, uniquingKeysWith: { _, new in new })
@@ -108,6 +144,39 @@ struct ThisWeekSectionsListView: View {
         .padding(.horizontal)
         .padding(.vertical, 8)
         .background(Colors.background)
+    }
+
+    @ViewBuilder
+    private var unplannedHeader: some View {
+        HStack {
+            Button(action: { viewModel.toggleSectionCollapsed(for: "unplanned") }) {
+                Image(systemName: viewModel.isSectionCollapsed(dayKey: "unplanned") ? "chevron.right" : "chevron.down")
+            }
+            .buttonStyle(.plain)
+            Image(systemName: "tray.slash")
+                .foregroundColor(Colors.onSurface)
+            Text("Unplanned")
+                .style(Typography.title3)
+                .foregroundColor(Colors.onSurface)
+            Spacer()
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(Colors.background)
+    }
+
+    private func unplannedItems() -> [(Task, [Label])] {
+        let cal = Calendar.current
+        let now = Date()
+        let monday = WeekPlanner.mondayOfCurrentWeek(for: now, calendar: cal)
+        let friday = WeekPlanner.fridayOfCurrentWeek(for: now, calendar: cal)
+        return viewModel.tasksWithLabels.filter { pair in
+            let t = pair.0
+            guard t.bucketKey == .thisWeek, t.isCompleted == false else { return false }
+            guard let due = t.dueAt else { return true }
+            let startDue = cal.startOfDay(for: due)
+            return !(startDue >= monday && startDue <= friday)
+        }
     }
 }
 

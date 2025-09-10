@@ -96,6 +96,7 @@ struct TaskCard: View {
                                 return cal.date(byAdding: .day, value: 1, to: start) ?? dueAt
                             }()
                             DueChip(date: dueAt, showsTime: task.dueHasTime, isOverdue: !task.isCompleted && now >= deadline)
+                                .layoutPriority(2)
                         }
                     }
                 }
@@ -175,6 +176,8 @@ private struct DueChip: View {
         HStack(spacing: 4) {
             Image(systemName: "clock")
             Text(showsTime ? DateFormatter.shortDateTime.string(from: date) : DateFormatter.shortDate.string(from: date))
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
         .font(.caption2)
         .padding(.horizontal, 6)
