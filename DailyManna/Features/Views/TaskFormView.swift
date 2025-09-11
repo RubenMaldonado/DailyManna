@@ -149,6 +149,13 @@ struct TaskFormView: View {
                             _ = task
                             selectedLabels = Set(labels.map { $0.id })
                         }
+                        // Load existing recurrence for editing so the picker reflects current rule
+                        if let recUC: RecurrenceUseCases = try? deps.resolve(type: RecurrenceUseCases.self) {
+                            let uid = authService.currentUser?.id ?? draft.userId
+                            if let rec = try? await recUC.getByTaskTemplateId(draft.id, userId: uid) {
+                                await MainActor.run { self.recurrenceRule = rec.rule }
+                            }
+                        }
                         await loadSubtasks()
                     }
                 }

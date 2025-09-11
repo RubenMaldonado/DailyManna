@@ -21,12 +21,26 @@ struct TaskListScreenIOS: View {
             if let syncError = viewModel.syncErrorMessage { errorBanner(syncError) }
             if let t = viewModel.pendingDelete { pendingDeleteBanner(t) }
             headerBar()
-            if viewMode != .board { BucketHeader(bucket: viewModel.selectedBucket, count: viewModel.bucketCounts[viewModel.selectedBucket] ?? 0).padding(.horizontal) }
+            if viewMode != .board {
+                BucketHeader(
+                    bucket: viewModel.selectedBucket,
+                    count: viewModel.bucketCounts[viewModel.selectedBucket] ?? 0,
+                    onAdd: {
+                        let draft = makeDraftForBucket(viewModel.selectedBucket)
+                        viewModel.presentCreateForm()
+                        NotificationCenter.default.post(name: Notification.Name("dm.prefill.draft"), object: nil, userInfo: ["draftId": draft.id])
+                    }
+                )
+                .padding(.horizontal)
+            }
             if hasActiveFilters { filtersRow() }
             content()
             Spacer(minLength: 0)
         }
         .background(Colors.background)
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("dm.prefill.draft"))) { note in
+            // no-op: placeholder if later we want to set local state
+        }
         .task {
             await viewModel.refreshCounts()
             await viewModel.fetchTasks(in: viewModel.selectedBucket)
@@ -186,7 +200,7 @@ struct TaskListScreenIOS: View {
             let draft = TaskDraft(from: editing)
             TaskFormView(isEditing: true, draft: draft) { draft in _Concurrency.Task { await viewModel.save(draft: draft) } } onCancel: {}
         } else {
-            let draft = TaskDraft(userId: userId, bucket: viewModel.selectedBucket)
+            let draft = viewModel.prefilledDraft ?? TaskDraft(userId: userId, bucket: viewModel.selectedBucket)
             TaskComposerView(draft: draft) { draft in _Concurrency.Task { await viewModel.save(draft: draft) } } onCancel: {}
                 .environmentObject(authService)
         }

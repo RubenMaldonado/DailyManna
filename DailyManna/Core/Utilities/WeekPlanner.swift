@@ -38,6 +38,29 @@ public enum WeekPlanner {
         return calendar.date(byAdding: .day, value: 4, to: monday) ?? monday
     }
 
+    /// Returns the next Monday following the provided date (not inclusive). Normalized to start of day.
+    public static func nextMonday(after date: Date = Date(), calendar: Calendar = .current) -> Date {
+        var cal = calendar
+        cal.firstWeekday = 2 // Monday
+        let start = cal.startOfDay(for: date)
+        // Compute Monday of current week then add 7 days to get next week's Monday
+        let thisWeekMonday = mondayOfCurrentWeek(for: start, calendar: cal)
+        return cal.date(byAdding: .day, value: 7, to: thisWeekMonday) ?? thisWeekMonday
+    }
+
+    /// Returns the nearest upcoming Saturday relative to `date` (including today if Saturday).
+    /// If the day is Sunday, returns Sunday (today). Always start of day.
+    public static func weekendAnchor(for date: Date = Date(), calendar: Calendar = .current) -> Date {
+        let cal = calendar
+        let start = cal.startOfDay(for: date)
+        let weekday = cal.component(.weekday, from: start) // Sunday=1 ... Saturday=7
+        if weekday == 7 { return start } // Saturday
+        if weekday == 1 { return start } // Sunday
+        // Weekday: compute next Saturday
+        let daysUntilSaturday = 7 - weekday
+        return cal.date(byAdding: .day, value: daysUntilSaturday, to: start) ?? start
+    }
+
     /// Returns dates for remaining weekdays from `today` (inclusive Today for section titles) to Friday, excluding weekends
     public static func remainingWeekdays(from today: Date = Date(), calendar: Calendar = .current) -> [Date] {
         let cal = calendar

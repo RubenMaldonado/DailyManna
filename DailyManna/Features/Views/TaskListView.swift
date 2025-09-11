@@ -130,7 +130,7 @@ struct TaskListView: View {
                     _Concurrency.Task { await viewModel.save(draft: draft) }
                 } onCancel: {}
             } else {
-                let draft = TaskDraft(userId: userId, bucket: viewModel.selectedBucket)
+                let draft = viewModel.prefilledDraft ?? TaskDraft(userId: userId, bucket: viewModel.selectedBucket)
                 TaskComposerView(draft: draft) { draft in
                     _Concurrency.Task { await viewModel.save(draft: draft) }
                 } onCancel: {}
@@ -439,7 +439,27 @@ private extension TaskListView {
     var bucketHeaderIfNeeded: some View {
         if currentViewMode != .board {
             BucketHeader(bucket: viewModel.selectedBucket,
-                         count: viewModel.bucketCounts[viewModel.selectedBucket] ?? 0)
+                         count: viewModel.bucketCounts[viewModel.selectedBucket] ?? 0,
+                         onAdd: {
+                var draft = TaskDraft(userId: userId, bucket: viewModel.selectedBucket)
+                let cal = Calendar.current
+                switch viewModel.selectedBucket {
+                case .thisWeek:
+                    draft.dueAt = cal.startOfDay(for: Date())
+                    draft.dueHasTime = false
+                case .nextWeek:
+                    draft.dueAt = WeekPlanner.nextMonday(after: Date())
+                    draft.dueHasTime = false
+                case .weekend:
+                    draft.dueAt = WeekPlanner.weekendAnchor(for: Date())
+                    draft.dueHasTime = false
+                case .nextMonth, .routines:
+                    draft.dueAt = nil
+                    draft.dueHasTime = false
+                }
+                viewModel.presentCreateForm()
+                NotificationCenter.default.post(name: Notification.Name("dm.prefill.draft"), object: nil, userInfo: ["draftId": draft.id])
+            })
             .padding(.horizontal)
         }
     }

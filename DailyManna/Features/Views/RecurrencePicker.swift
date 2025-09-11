@@ -36,6 +36,8 @@ struct RecurrencePicker: View {
             }
         }
         .onAppear { loadFromRule() }
+        // If the bound rule changes from outside (e.g., loaded async), reflect it
+        .onChange(of: rule) { _, _ in loadFromRule() }
     }
 
     private func loadFromRule() {

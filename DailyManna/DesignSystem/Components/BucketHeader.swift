@@ -10,10 +10,12 @@ import SwiftUI
 struct BucketHeader: View {
     let bucket: TimeBucket
     let count: Int
+    let onAdd: (() -> Void)?
     
-    init(bucket: TimeBucket, count: Int) {
+    init(bucket: TimeBucket, count: Int, onAdd: (() -> Void)? = nil) {
         self.bucket = bucket
         self.count = count
+        self.onAdd = onAdd
     }
     
     var body: some View {
@@ -23,6 +25,11 @@ struct BucketHeader: View {
                 .foregroundColor(Colors.onSurface)
             CountBadge(count: count, tint: Colors.color(for: bucket))
             Spacer()
+            if let onAdd {
+                Button(action: onAdd) { Image(systemName: "plus") }
+                    .buttonStyle(SecondaryButtonStyle(size: .small))
+                    .accessibilityLabel("Add task to \(bucket.displayName)")
+            }
         }
         .padding(.horizontal, Spacing.small)
         .padding(.vertical, Spacing.xSmall)

@@ -26,6 +26,8 @@ final class TaskListViewModel: ObservableObject {
     @Published var pendingDelete: Task? = nil
     @Published var isBoardModeActive: Bool = false
     @Published var syncErrorMessage: String? = nil
+    @Published var prefilledDraft: TaskDraft? = nil
+    @Published var lastCreatedTaskId: UUID? = nil
     @AppStorage("sortByDueDate") private var sortByDueDate: Bool = false
     // Filtering
     @Published var activeFilterLabelIds: Set<UUID> = []
@@ -77,7 +79,7 @@ final class TaskListViewModel: ObservableObject {
         }
 
         // Listen for label selections from TaskForm
-        NotificationCenter.default.addObserver(forName: Notification.Name("dm.taskform.labels.selection"), object: nil, queue: .main) { [weak self] note in
+        NotificationCenter.default.addObserver(forName: Notification.Name("dm.taskform.labels.selection"), object: nil, queue: nil) { [weak self] note in
             guard let self else { return }
             guard let taskId = note.userInfo?["taskId"] as? UUID,
                   let ids = note.userInfo?["labelIds"] as? [UUID] else { return }
@@ -86,7 +88,7 @@ final class TaskListViewModel: ObservableObject {
             }
         }
         // Listen for recurrence selection from TaskForm
-        NotificationCenter.default.addObserver(forName: Notification.Name("dm.taskform.recurrence.selection"), object: nil, queue: .main) { [weak self] note in
+        NotificationCenter.default.addObserver(forName: Notification.Name("dm.taskform.recurrence.selection"), object: nil, queue: nil) { [weak self] note in
             guard let self else { return }
             guard let taskId = note.userInfo?["taskId"] as? UUID,
                   let data = note.userInfo?["ruleJSON"] as? Data,
@@ -504,6 +506,14 @@ final class TaskListViewModel: ObservableObject {
         editingTask = nil
         isPresentingTaskForm = true
     }
+
+    /// Present the lightweight composer prefilled for a specific bucket with default due date policy.
+    func presentCreateForm(bucket: TimeBucket) {
+        selectedBucket = bucket
+        prefilledDraft = makeDraftForBucket(bucket)
+        editingTask = nil
+        isPresentingTaskForm = true
+    }
     
     func presentEditForm(task: Task) {
         editingTask = task
@@ -545,6 +555,8 @@ final class TaskListViewModel: ObservableObject {
             } else {
                 let newTask = draft.toNewTask()
                 try await taskUseCases.createTask(newTask)
+                NotificationCenter.default.post(name: Notification.Name("dm.task.created"), object: nil, userInfo: ["taskId": newTask.id])
+                lastCreatedTaskId = newTask.id
                 if let due = newTask.dueAt {
                     let scheduleAt: Date = {
                         if newTask.dueHasTime { return due }
@@ -572,10 +584,31 @@ final class TaskListViewModel: ObservableObject {
             }
             await refreshCounts()
             await fetchTasks(in: isBoardModeActive ? nil : selectedBucket)
+            prefilledDraft = nil
         } catch {
             errorMessage = "Failed to save task: \(error.localizedDescription)"
             Logger.shared.error("Failed to save task", category: .ui, error: error)
         }
+    }
+
+    private func makeDraftForBucket(_ bucket: TimeBucket) -> TaskDraft {
+        var draft = TaskDraft(userId: userId, bucket: bucket)
+        let cal = Calendar.current
+        switch bucket {
+        case .thisWeek:
+            draft.dueAt = cal.startOfDay(for: Date())
+            draft.dueHasTime = false
+        case .nextWeek:
+            draft.dueAt = WeekPlanner.nextMonday(after: Date())
+            draft.dueHasTime = false
+        case .weekend:
+            draft.dueAt = WeekPlanner.weekendAnchor(for: Date())
+            draft.dueHasTime = false
+        case .nextMonth, .routines:
+            draft.dueAt = nil
+            draft.dueHasTime = false
+        }
+        return draft
     }
 
     private func persistLabelSelections(taskId: UUID) async {}

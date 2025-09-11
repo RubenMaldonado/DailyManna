@@ -25,7 +25,10 @@ struct InlineBoardView: View {
                             onToggle: { task in _Concurrency.Task { await viewModel.toggleTaskCompletion(task: task, refreshIn: nil) } },
                             onPauseResume: { id in _Concurrency.Task { await viewModel.pauseResume(taskId: id) } },
                             onSkipNext: { id in _Concurrency.Task { await viewModel.skipNext(taskId: id) } },
-                            onGenerateNow: { id in _Concurrency.Task { await viewModel.generateNow(taskId: id) } }
+                            onGenerateNow: { id in _Concurrency.Task { await viewModel.generateNow(taskId: id) } },
+                            onAdd: {
+                                viewModel.presentCreateForm(bucket: .thisWeek)
+                            }
                         )
                         .id(bucket.rawValue)
                     } else {
@@ -39,6 +42,28 @@ struct InlineBoardView: View {
                             onMove: { taskId, dest in _Concurrency.Task { await viewModel.move(taskId: taskId, to: dest, refreshIn: nil) } },
                             onEdit: { task in viewModel.presentEditForm(task: task) },
                             onDelete: { task in viewModel.confirmDelete(task) },
+                            onAdd: {
+                                var draft = TaskDraft(userId: viewModel.userId, bucket: bucket)
+                                let cal = Calendar.current
+                                switch bucket {
+                                case .thisWeek:
+                                    draft.dueAt = cal.startOfDay(for: Date())
+                                    draft.dueHasTime = false
+                                case .nextWeek:
+                                    draft.dueAt = WeekPlanner.nextMonday(after: Date())
+                                    draft.dueHasTime = false
+                                case .weekend:
+                                    draft.dueAt = WeekPlanner.weekendAnchor(for: Date())
+                                    draft.dueHasTime = false
+                                case .nextMonth, .routines:
+                                    draft.dueAt = nil
+                                    draft.dueHasTime = false
+                                }
+                                viewModel.selectedBucket = bucket
+                                viewModel.editingTask = nil
+                                viewModel.isPresentingTaskForm = true
+                                NotificationCenter.default.post(name: Notification.Name("dm.prefill.draft"), object: nil, userInfo: ["draftId": draft.id])
+                            },
                             onPauseResume: { id in _Concurrency.Task { await viewModel.pauseResume(taskId: id) } },
                             onSkipNext: { id in _Concurrency.Task { await viewModel.skipNext(taskId: id) } },
                             onGenerateNow: { id in _Concurrency.Task { await viewModel.generateNow(taskId: id) } }
@@ -65,6 +90,7 @@ struct InlineStandardBucketColumn: View {
     let onMove: (UUID, TimeBucket) -> Void
     let onEdit: (Task) -> Void
     let onDelete: (Task) -> Void
+    let onAdd: () -> Void
     let onPauseResume: (UUID) -> Void
     let onSkipNext: (UUID) -> Void
     let onGenerateNow: (UUID) -> Void
@@ -75,7 +101,7 @@ struct InlineStandardBucketColumn: View {
     @State private var dragFrames: [UUID: CGRect] = [:]
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xSmall) {
-            BucketHeader(bucket: bucket, count: tasksWithLabels.count)
+            BucketHeader(bucket: bucket, count: tasksWithLabels.count, onAdd: onAdd)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.xSmall) {
                     ForEach(tasksWithLabels, id: \.0.id) { pair in
@@ -152,12 +178,13 @@ struct InlineThisWeekColumn: View {
     let onPauseResume: (UUID) -> Void
     let onSkipNext: (UUID) -> Void
     let onGenerateNow: (UUID) -> Void
+    let onAdd: () -> Void
 
     private var sections: [WeekdaySection] { WeekPlanner.buildSections(for: Date()) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xSmall) {
-            BucketHeader(bucket: .thisWeek, count: tasksWithLabels.count)
+            BucketHeader(bucket: .thisWeek, count: tasksWithLabels.count, onAdd: onAdd)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.small) {
                     ForEach(sections, id: \.id) { section in
@@ -408,6 +435,7 @@ struct BoardRowFramePreferenceKey: PreferenceKey {
         onMove: {_,_ in},
         onEdit: {_ in},
         onDelete: {_ in},
+        onAdd: {},
         onPauseResume: {_ in},
         onSkipNext: {_ in},
         onGenerateNow: {_ in}

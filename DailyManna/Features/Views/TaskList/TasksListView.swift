@@ -15,29 +15,36 @@ struct TasksListView: View {
     @State private var showEndIndicator: Bool = false
     @State private var isDragActive: Bool = false
     var body: some View {
-        ScrollView { LazyVStack(spacing: 12) { content } }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .coordinateSpace(name: "listDrop")
-        #if os(macOS)
-        // macOS path uses dropDestination for simplicity to avoid cross-file delegate type dependency
-        .dropDestination(for: DraggableTaskID.self) { items, location in
-            guard let item = items.first else { return false }
-            computeDrop(location: location, moving: item.id)
-            return true
-        } isTargeted: { inside in
-            isDragActive = inside
-            if inside == false { insertBeforeId = nil; showEndIndicator = false }
+        ScrollViewReader { proxy in
+            ScrollView { LazyVStack(spacing: 12) { content } }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .coordinateSpace(name: "listDrop")
+            #if os(macOS)
+            // macOS path uses dropDestination for simplicity to avoid cross-file delegate type dependency
+            .dropDestination(for: DraggableTaskID.self) { items, location in
+                guard let item = items.first else { return false }
+                computeDrop(location: location, moving: item.id)
+                return true
+            } isTargeted: { inside in
+                isDragActive = inside
+                if inside == false { insertBeforeId = nil; showEndIndicator = false }
+            }
+            #else
+            .dropDestination(for: DraggableTaskID.self) { items, location in
+                guard let item = items.first else { return false }
+                computeDrop(location: location, moving: item.id)
+                return true
+            } isTargeted: { inside in
+                isDragActive = inside
+                if inside == false { insertBeforeId = nil; showEndIndicator = false }
+            }
+            #endif
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("dm.task.created"))) { note in
+                if let id = note.userInfo?["taskId"] as? UUID {
+                    withAnimation { proxy.scrollTo(id, anchor: .bottom) }
+                }
+            }
         }
-        #else
-        .dropDestination(for: DraggableTaskID.self) { items, location in
-            guard let item = items.first else { return false }
-            computeDrop(location: location, moving: item.id)
-            return true
-        } isTargeted: { inside in
-            isDragActive = inside
-            if inside == false { insertBeforeId = nil; showEndIndicator = false }
-        }
-        #endif
     }
     private func computeDrop(location: CGPoint, moving id: UUID) {
         let incomplete = tasksWithLabels.filter { !$0.0.isCompleted }
@@ -55,6 +62,7 @@ struct TasksListView: View {
         ForEach(tasksWithLabels, id: \.0.id) { pair in
             if isDragActive && insertBeforeId == pair.0.id { indicator }
             TasksListRowView(task: pair.0, labels: pair.1, subtaskProgress: subtaskProgressByParent[pair.0.id], onToggle: onToggle, onEdit: onEdit, onMove: onMove, onDelete: onDelete)
+                .id(pair.0.id)
                 .draggable(DraggableTaskID(id: pair.0.id))
                 .background(GeometryReader { proxy in
                     Color.clear.preference(key: ListRowFramePreferenceKey.self, value: [pair.0.id: proxy.frame(in: .named("listDrop"))])
