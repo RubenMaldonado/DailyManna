@@ -396,7 +396,8 @@ final class TaskListViewModel: ObservableObject {
     }
     
     func toggleTaskCompletion(task: Task) async {
-        await toggleTaskCompletion(task: task, refreshIn: isBoardModeActive ? nil : selectedBucket)
+        let filter: TimeBucket? = (forceAllBuckets || isBoardModeActive) ? nil : selectedBucket
+        await toggleTaskCompletion(task: task, refreshIn: filter)
     }
 
     func toggleTaskCompletion(task: Task, refreshIn filter: TimeBucket?) async {
@@ -437,7 +438,8 @@ final class TaskListViewModel: ObservableObject {
                 rec.status = (rec.status == "active") ? "paused" : "active"
                 Logger.shared.info("Toggle recurrence status for template=\(taskId) -> \(rec.status)", category: .ui)
                 try await recUC.update(rec)
-                await fetchTasks(in: isBoardModeActive ? nil : selectedBucket)
+                let filter: TimeBucket? = (forceAllBuckets || isBoardModeActive) ? nil : selectedBucket
+                await fetchTasks(in: filter)
             }
         } catch {
             Logger.shared.error("Failed to pause/resume recurrence", category: .ui, error: error)
@@ -646,8 +648,9 @@ final class TaskListViewModel: ObservableObject {
     }
     
     func move(taskId: UUID, to bucket: TimeBucket) async {
-        // Backward-compatible: refresh current list bucket
-        await move(taskId: taskId, to: bucket, refreshIn: isBoardModeActive ? nil : selectedBucket)
+        // Respect all-buckets mode when refreshing
+        let filter: TimeBucket? = (forceAllBuckets || isBoardModeActive) ? nil : selectedBucket
+        await move(taskId: taskId, to: bucket, refreshIn: filter)
     }
 
     /// Move task and refresh using a specific filter. Pass `nil` to refresh all buckets (board view).
@@ -669,7 +672,8 @@ final class TaskListViewModel: ObservableObject {
         do {
             try await taskUseCases.createTask(newTask)
             await refreshCounts()
-            await fetchTasks(in: isBoardModeActive ? nil : selectedBucket, showLoading: false)
+            let filter: TimeBucket? = (forceAllBuckets || isBoardModeActive) ? nil : selectedBucket
+            await fetchTasks(in: filter, showLoading: false)
         } catch {
             errorMessage = "Failed to add task: \(error.localizedDescription)"
             Logger.shared.error("Failed to add task", category: .ui, error: error)
@@ -680,7 +684,8 @@ final class TaskListViewModel: ObservableObject {
         do {
             try await taskUseCases.deleteTask(by: task.id, for: userId)
             await refreshCounts()
-            await fetchTasks(in: isBoardModeActive ? nil : selectedBucket)
+            let filter: TimeBucket? = (forceAllBuckets || isBoardModeActive) ? nil : selectedBucket
+            await fetchTasks(in: filter)
         } catch {
             errorMessage = "Failed to delete task: \(error.localizedDescription)"
             Logger.shared.error("Failed to delete task", category: .ui, error: error)
@@ -778,7 +783,8 @@ final class TaskListViewModel: ObservableObject {
         await syncService.sync(for: userId)
         // Refresh tasks after sync
         await refreshCounts()
-        await fetchTasks(in: isBoardModeActive ? nil : selectedBucket)
+        let filter: TimeBucket? = (forceAllBuckets || isBoardModeActive) ? nil : selectedBucket
+        await fetchTasks(in: filter)
     }
     
     func startPeriodicSync() {
