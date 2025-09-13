@@ -19,7 +19,7 @@ struct ThisWeekSectionsListView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: Spacing.small, pinnedViews: [.sectionHeaders]) {
+            LazyVStack(alignment: .leading, spacing: Spacing.xSmall, pinnedViews: [.sectionHeaders]) {
                 ForEach(viewModel.thisWeekSections, id: \.id) { section in
                     Section(header: header(for: section)) {
                         if viewModel.isSectionCollapsed(dayKey: section.id) == false {

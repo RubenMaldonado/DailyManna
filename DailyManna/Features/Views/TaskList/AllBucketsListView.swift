@@ -16,7 +16,7 @@ struct AllBucketsListView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: Spacing.medium, pinnedViews: [.sectionHeaders]) {
+                LazyVStack(alignment: .leading, spacing: Spacing.small, pinnedViews: [.sectionHeaders]) {
                     ForEach(bucketOrder) { bucket in
                         Section(header: header(bucket)) {
                             if collapsedBuckets.contains(bucket) == false {

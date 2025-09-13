@@ -16,7 +16,7 @@ struct TasksListView: View {
     @State private var isDragActive: Bool = false
     var body: some View {
         ScrollViewReader { proxy in
-            ScrollView { LazyVStack(spacing: 12) { content } }
+            ScrollView { LazyVStack(spacing: Spacing.xSmall) { content } }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .coordinateSpace(name: "listDrop")
             #if os(macOS)
