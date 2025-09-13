@@ -35,6 +35,14 @@ struct BucketHeader: View {
         .padding(.vertical, Spacing.xSmall)
         .surfaceStyle(.content)
         .cornerRadius(Spacing.xSmall)
+        // Add a subtle leading accent to strengthen section hierarchy
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(Colors.color(for: bucket))
+                .opacity(0.25)
+                .frame(width: 3)
+                .clipShape(RoundedRectangle(cornerRadius: 2))
+        }
         .accessibilityElement(children: .combine)
     }
 }
