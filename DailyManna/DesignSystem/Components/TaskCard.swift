@@ -80,9 +80,19 @@ struct TaskCard: View {
                 } else {
                     HStack(alignment: .center, spacing: Spacing.small) {
                         if !labels.isEmpty {
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: Spacing.xxSmall) {
-                                    ForEach(labels) { label in LabelChip(label: label) }
+                            // Show the first chip and collapse the rest as "+N" to reduce clutter
+                            let first = labels.first!
+                            let remaining = max(0, labels.count - 1)
+                            HStack(spacing: Spacing.xxSmall) {
+                                LabelChip(label: first)
+                                if remaining > 0 {
+                                    Text("+\(remaining)")
+                                        .style(Typography.caption)
+                                        .padding(.horizontal, Spacing.xxSmall)
+                                        .padding(.vertical, 2)
+                                        .background(Colors.surfaceVariant.opacity(0.08))
+                                        .cornerRadius(6)
+                                        .foregroundColor(Colors.onSurfaceVariant)
                                 }
                             }
                         }
@@ -117,9 +127,10 @@ struct TaskCard: View {
             }
             Spacer()
         }
-        .cardPadding()
-        .surfaceStyle(.content)
-        .cornerRadius(Spacing.small)
+        // Compact list rows should look lighter than board cards
+        .padding(Spacing.cardPadding - 6)
+        .background(layout == .list ? Colors.surface.opacity(0.02) : Colors.surface)
+        .cornerRadius(layout == .list ? Spacing.xSmall : Spacing.small)
         .contextMenu {
             if showsRecursIcon {
                 Button("Pause/Resume") { onPauseResume?() }

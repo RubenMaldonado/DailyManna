@@ -16,16 +16,17 @@ struct LabelChip: View {
     }
     
     var body: some View {
-        let bgAlpha: Double = colorScheme == .dark ? 0.28 : 0.18
+        // Make chips subtler in list context to reduce visual noise
+        let bgAlpha: Double = colorScheme == .dark ? 0.18 : 0.12
         let fg = Contrast.bestBWForeground(forHexBackground: label.color)
         Text(label.name)
             .style(Typography.caption)
-            .padding(.horizontal, Spacing.xSmall)
-            .padding(.vertical, Spacing.xxSmall)
-            .frame(minHeight: 28)
+            .padding(.horizontal, Spacing.xxSmall)
+            .padding(.vertical, 2)
+            .frame(minHeight: 22)
             .background(label.uiColor.opacity(bgAlpha))
-            .overlay(RoundedRectangle(cornerRadius: Spacing.xxSmall).stroke(Colors.outline, lineWidth: 0.5))
-            .cornerRadius(Spacing.xxSmall)
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Colors.outline.opacity(0.6), lineWidth: 0.5))
+            .cornerRadius(6)
             .foregroundColor(fg)
             .accessibilityLabel("Label: \(label.name)")
     }
