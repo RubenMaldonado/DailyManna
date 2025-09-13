@@ -61,6 +61,38 @@ final class TaskListViewModelSectionsTests: XCTestCase {
         XCTAssertNil(updated!.dueAt)
         XCTAssertEqual(updated!.bucketKey, .thisWeek)
     }
+
+    func testNextWeekGrouping_IncludesSevenDaysAndUnplanned() async throws {
+        let vm = try makeViewModel()
+        vm.featureNextWeekSectionsEnabled = true
+        let repo: TasksRepository = try Dependencies.shared.resolve(type: TasksRepository.self)
+        let user = vm.userId
+        let cal = Calendar.current
+        let nextMon = WeekPlanner.nextMonday(after: Date())
+        // Create three tasks: Mon, Sun, and undated assigned to nextWeek
+        let tMon = Task(userId: user, bucketKey: .nextWeek, title: "N1", dueAt: nextMon, dueHasTime: false)
+        let tSun = Task(userId: user, bucketKey: .nextWeek, title: "N2", dueAt: cal.date(byAdding: .day, value: 6, to: nextMon), dueHasTime: false)
+        let tUnp = Task(userId: user, bucketKey: .nextWeek, title: "N3", dueAt: nil, dueHasTime: false)
+        try await repo.createTask(tMon)
+        try await repo.createTask(tSun)
+        try await repo.createTask(tUnp)
+        await vm.select(bucket: .nextWeek)
+        // Build sections and map
+        let secs = WeekPlanner.buildNextWeekSections(for: Date())
+        XCTAssertEqual(secs.count, 7)
+        // Verify Mon & Sun present
+        let monKey = WeekPlanner.isoDayKey(for: nextMon)
+        let sunKey = WeekPlanner.isoDayKey(for: cal.startOfDay(for: cal.date(byAdding: .day, value: 6, to: nextMon)!))
+        // Fetch after grouping
+        await vm.fetchTasks(in: .nextWeek)
+        // Trigger grouping
+        // Access published state (should be set by select -> fetch -> derive)
+        XCTAssertNotNil(vm.tasksByNextWeekDayKey[monKey])
+        XCTAssertNotNil(vm.tasksByNextWeekDayKey[sunKey])
+        // Unplanned should include N3
+        let unplanned = vm.tasksWithLabels.filter { $0.0.bucketKey == .nextWeek && $0.0.dueAt == nil }
+        XCTAssertTrue(unplanned.contains(where: { $0.0.title == "N3" }))
+    }
 }
 
 

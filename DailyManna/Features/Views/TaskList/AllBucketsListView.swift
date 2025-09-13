@@ -39,6 +39,24 @@ struct AllBucketsListView: View {
                                             .padding(.vertical, Spacing.xSmall)
                                             .offset(x: Spacing.medium)
                                     }
+                                } else if bucket == .nextWeek && viewModel.featureNextWeekSectionsEnabled {
+                                    NextWeekSectionsListView(
+                                        viewModel: viewModel,
+                                        onToggle: { task in _Concurrency.Task { await viewModel.toggleTaskCompletion(task: task) } },
+                                        onEdit: { task in viewModel.presentEditForm(task: task) },
+                                        onDelete: { task in viewModel.confirmDelete(task) }
+                                    )
+                                    .id("section_\(bucket.rawValue)")
+                                    .padding(.leading, Spacing.large)
+                                    .padding(.trailing, Spacing.medium)
+                                    .overlay(alignment: .leading) {
+                                        Rectangle()
+                                            .fill(Colors.onSurfaceVariant)
+                                            .opacity(0.15)
+                                            .frame(width: 2)
+                                            .padding(.vertical, Spacing.xSmall)
+                                            .offset(x: Spacing.medium)
+                                    }
                                 } else {
                                     let pairs = viewModel.tasksWithLabels.filter { $0.0.bucketKey == bucket }
                                     TasksListContent(

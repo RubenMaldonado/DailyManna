@@ -31,6 +31,27 @@ struct InlineBoardView: View {
                             }
                         )
                         .id(bucket.rawValue)
+                    } else if bucket == .nextWeek && viewModel.featureNextWeekSectionsEnabled {
+                        InlineNextWeekColumn(
+                            tasksWithLabels: viewModel.tasksWithLabels.filter { $0.0.bucketKey == .nextWeek },
+                            subtaskProgressByParent: viewModel.subtaskProgressByParent,
+                            tasksWithRecurrence: viewModel.tasksWithRecurrence,
+                            isSectionCollapsed: { key in viewModel.isSectionCollapsed(dayKey: key) },
+                            toggleSectionCollapsed: { key in viewModel.toggleSectionCollapsed(for: key) },
+                            schedule: { id, date in _Concurrency.Task { await viewModel.schedule(taskId: id, to: date) } },
+                            unschedule: { id in _Concurrency.Task { await viewModel.unschedule(taskId: id) } },
+                            onMoveBucket: { taskId, dest in _Concurrency.Task { await viewModel.move(taskId: taskId, to: dest, refreshIn: nil) } },
+                            onEdit: { task in viewModel.presentEditForm(task: task) },
+                            onDelete: { task in viewModel.confirmDelete(task) },
+                            onToggle: { task in _Concurrency.Task { await viewModel.toggleTaskCompletion(task: task, refreshIn: nil) } },
+                            onPauseResume: { id in _Concurrency.Task { await viewModel.pauseResume(taskId: id) } },
+                            onSkipNext: { id in _Concurrency.Task { await viewModel.skipNext(taskId: id) } },
+                            onGenerateNow: { id in _Concurrency.Task { await viewModel.generateNow(taskId: id) } },
+                            onAdd: {
+                                viewModel.presentCreateForm(bucket: .nextWeek)
+                            }
+                        )
+                        .id(bucket.rawValue)
                     } else {
                         InlineStandardBucketColumn(
                             bucket: bucket,
@@ -109,6 +130,7 @@ struct InlineStandardBucketColumn: View {
                         TaskCard(
                             task: pair.0,
                             labels: pair.1,
+                            highlighted: (bucket == .thisWeek && pair.0.bucketKey != .thisWeek) || (bucket == .nextWeek && pair.0.bucketKey != .nextWeek),
                             onToggleCompletion: { onToggle(pair.0) },
                             subtaskProgress: subtaskProgressByParent[pair.0.id],
                             showsRecursIcon: tasksWithRecurrence.contains(pair.0.id),
@@ -359,6 +381,144 @@ struct InlineThisWeekColumn: View {
         .padding(.horizontal, Spacing.xSmall)
     }
 
+}
+
+struct InlineNextWeekColumn: View {
+    let tasksWithLabels: [(Task, [Label])]
+    let subtaskProgressByParent: [UUID: (completed: Int, total: Int)]
+    let tasksWithRecurrence: Set<UUID>
+    let isSectionCollapsed: (String) -> Bool
+    let toggleSectionCollapsed: (String) -> Void
+    let schedule: (UUID, Date) -> Void
+    let unschedule: (UUID) -> Void
+    let onMoveBucket: (UUID, TimeBucket) -> Void
+    let onEdit: (Task) -> Void
+    let onDelete: (Task) -> Void
+    let onToggle: (Task) -> Void
+    let onPauseResume: (UUID) -> Void
+    let onSkipNext: (UUID) -> Void
+    let onGenerateNow: (UUID) -> Void
+    let onAdd: () -> Void
+
+    private var sections: [WeekdaySection] { WeekPlanner.buildNextWeekSections(for: Date()) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xSmall) {
+            BucketHeader(bucket: .nextWeek, count: tasksWithLabels.count, onAdd: onAdd)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: Spacing.small) {
+                    ForEach(sections, id: \.id) { section in
+                        sectionView(section)
+                    }
+                    unplannedSection
+                }
+            }
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+        .padding(.vertical, Spacing.small)
+        .surfaceStyle(.content)
+        .cornerRadius(12)
+        .frame(width: BoardMetrics.columnWidth)
+    }
+
+    @ViewBuilder
+    private func sectionView(_ section: WeekdaySection) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+            HStack {
+                Button(action: { toggleSectionCollapsed(section.id) }) { Image(systemName: isSectionCollapsed(section.id) ? "chevron.right" : "chevron.down") }
+                .buttonStyle(.plain)
+                Text(section.title).style(Typography.title3).foregroundColor(Colors.onSurface)
+                Spacer()
+            }
+            .padding(.horizontal, Spacing.xSmall)
+
+            if isSectionCollapsed(section.id) == false {
+                let items: [(Task, [Label])] = itemsForSection(section)
+                if items.isEmpty {
+                    Text("No tasks scheduled").style(Typography.body).foregroundColor(Colors.onSurfaceVariant).padding(.horizontal, Spacing.xSmall).padding(.vertical, Spacing.small)
+                } else {
+                    ForEach(items, id: \.0.id) { pair in
+                        taskRow(pair: pair, section: section)
+                    }
+                }
+            }
+        }
+        .dropDestination(for: DraggableTaskID.self) { items, _ in
+            guard let item = items.first else { return false }
+            Telemetry.record(.taskRescheduledDrag, metadata: ["to_day": section.title])
+            schedule(item.id, section.date)
+            return true
+        }
+    }
+
+    private func itemsForSection(_ section: WeekdaySection) -> [(Task, [Label])] {
+        let cal: Calendar = Calendar.current
+        return tasksWithLabels.filter { pair in
+            let t = pair.0
+            guard t.isCompleted == false, let due = t.dueAt else { return false }
+            let startDue = cal.startOfDay(for: due)
+            return startDue == section.date
+        }
+    }
+
+    private var unplannedItems: [(Task, [Label])] {
+        tasksWithLabels.filter { pair in
+            let t = pair.0
+            return t.bucketKey == .nextWeek && t.isCompleted == false && t.dueAt == nil
+        }
+    }
+
+    @ViewBuilder
+    private var unplannedSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.xxSmall) {
+            HStack {
+                Button(action: { toggleSectionCollapsed("unplanned") }) { Image(systemName: isSectionCollapsed("unplanned") ? "chevron.right" : "chevron.down") }
+                .buttonStyle(.plain)
+                Image(systemName: "tray.slash").foregroundColor(Colors.onSurface)
+                Text("Unplanned").style(Typography.title3).foregroundColor(Colors.onSurface)
+                Spacer()
+            }
+            .padding(.horizontal, Spacing.xSmall)
+
+            if isSectionCollapsed("unplanned") == false {
+                let items = unplannedItems
+                if items.isEmpty {
+                    Text("No unplanned tasks").style(Typography.body).foregroundColor(Colors.onSurfaceVariant).padding(.horizontal, Spacing.xSmall).padding(.vertical, Spacing.small)
+                } else {
+                    ForEach(items, id: \.0.id) { pair in
+                        TaskCard(
+                            task: pair.0,
+                            labels: pair.1,
+                            onToggleCompletion: { onToggle(pair.0) },
+                            subtaskProgress: subtaskProgressByParent[pair.0.id],
+                            showsRecursIcon: tasksWithRecurrence.contains(pair.0.id),
+                            onPauseResume: { onPauseResume(pair.0.id) },
+                            onSkipNext: { onSkipNext(pair.0.id) },
+                            onGenerateNow: { onGenerateNow(pair.0.id) }
+                        )
+                        .contextMenu {
+                            Menu("Schedule") {
+                                ForEach(sections, id: \.id) { sec in
+                                    Button(sec.title) { schedule(pair.0.id, sec.date) }
+                                }
+                            }
+                            Button("Clear Due Date") { unschedule(pair.0.id) }
+                            Button("Edit") { onEdit(pair.0) }
+                            Button(role: .destructive) { onDelete(pair.0) } label: { Text("Delete") }
+                        }
+                        .onTapGesture(count: 2) { onEdit(pair.0) }
+                        .draggable(DraggableTaskID(id: pair.0.id))
+                        .padding(.horizontal, Spacing.xSmall)
+                    }
+                }
+            }
+        }
+        .dropDestination(for: DraggableTaskID.self) { items, _ in
+            guard let item = items.first else { return false }
+            unschedule(item.id)
+            return true
+        }
+    }
 }
 
 struct InlineColumnDropDelegate: DropDelegate {

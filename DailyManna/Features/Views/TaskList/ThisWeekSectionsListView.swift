@@ -35,7 +35,7 @@ struct ThisWeekSectionsListView: View {
                                     if isDragActive, let insertId = insertBeforeIdByDay[section.id] ?? nil, insertId == pair.0.id {
                                         Rectangle().fill(Colors.primary).frame(height: 2).padding(.vertical, 2)
                                     }
-                                    TaskCard(task: pair.0, labels: pair.1, onToggleCompletion: { onToggle(pair.0) })
+                                    TaskCard(task: pair.0, labels: pair.1, highlighted: pair.0.bucketKey != .thisWeek, onToggleCompletion: { onToggle(pair.0) })
                                         .contextMenu {
                                             if viewModel.thisWeekSections.firstIndex(where: { $0.id == section.id }) != nil {
                                                 let remaining = Array(viewModel.thisWeekSections.dropFirst())
@@ -97,7 +97,7 @@ struct ThisWeekSectionsListView: View {
                                 .padding(.vertical, Spacing.small)
                         } else {
                             ForEach(items, id: \.0.id) { pair in
-                                TaskCard(task: pair.0, labels: pair.1, onToggleCompletion: { onToggle(pair.0) })
+                                TaskCard(task: pair.0, labels: pair.1, highlighted: pair.0.bucketKey != .thisWeek, onToggleCompletion: { onToggle(pair.0) })
                                     .contextMenu {
                                         Menu("Schedule") {
                                             ForEach(viewModel.thisWeekSections, id: \.id) { sec in

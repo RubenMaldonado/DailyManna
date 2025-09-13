@@ -48,6 +48,13 @@ public enum WeekPlanner {
         return cal.date(byAdding: .day, value: 7, to: thisWeekMonday) ?? thisWeekMonday
     }
 
+    /// Returns the Sunday for the next week (Mon+6) relative to the provided date
+    public static func nextSunday(after date: Date = Date(), calendar: Calendar = .current) -> Date {
+        let cal = calendar
+        let nextMon = nextMonday(after: date, calendar: cal)
+        return cal.date(byAdding: .day, value: 6, to: nextMon).map { cal.startOfDay(for: $0) } ?? nextMon
+    }
+
     /// Returns the nearest upcoming Saturday relative to `date` (including today if Saturday).
     /// If the day is Sunday, returns Sunday (today). Always start of day.
     public static func weekendAnchor(for date: Date = Date(), calendar: Calendar = .current) -> Date {
@@ -90,6 +97,38 @@ public enum WeekPlanner {
         }
     }
 
+    /// Returns the Saturday and Sunday (start of day) for the current week of the provided date
+    public static func saturdayAndSundayOfCurrentWeek(for date: Date = Date(), calendar: Calendar = .current) -> (saturday: Date, sunday: Date) {
+        let cal = calendar
+        let monday = mondayOfCurrentWeek(for: date, calendar: cal)
+        let saturday = cal.date(byAdding: .day, value: 5, to: monday).map { cal.startOfDay(for: $0) } ?? monday
+        let sunday = cal.date(byAdding: .day, value: 6, to: monday).map { cal.startOfDay(for: $0) } ?? saturday
+        return (saturday, sunday)
+    }
+
+    /// Returns two dates representing this weekend (Saturday and Sunday) of the current week
+    public static func thisWeekendDates(for date: Date = Date(), calendar: Calendar = .current) -> [Date] {
+        let pair = saturdayAndSundayOfCurrentWeek(for: date, calendar: calendar)
+        return [pair.saturday, pair.sunday]
+    }
+
+    /// Returns seven start-of-day dates for next week (Mon–Sun) relative to the provided date
+    public static func datesOfNextWeek(from date: Date = Date(), calendar: Calendar = .current) -> [Date] {
+        let cal = calendar
+        let nextMon = nextMonday(after: date, calendar: cal)
+        return (0...6).compactMap { offset in cal.date(byAdding: .day, value: offset, to: nextMon) }.map { cal.startOfDay(for: $0) }
+    }
+
+    /// Builds seven sections for next week (Mon–Sun) with localized short titles (e.g., "Tue, Sep 16")
+    public static func buildNextWeekSections(for today: Date = Date(), calendar: Calendar = .current, dateFormatter: DateFormatter = WeekPlanner.shortHeaderDateFormatter) -> [WeekdaySection] {
+        let cal = calendar
+        let dates = datesOfNextWeek(from: today, calendar: cal)
+        return dates.map { date in
+            let title = dateFormatter.string(from: date)
+            return WeekdaySection(id: isoDayKey(for: date, calendar: cal), date: date, title: title, isToday: false)
+        }
+    }
+
     /// ISO-like day key yyyy-MM-dd in local time
     public static func isoDayKey(for date: Date, calendar: Calendar = .current) -> String {
         let comps = calendar.dateComponents([.year, .month, .day], from: date)
@@ -105,6 +144,13 @@ public enum WeekPlanner {
     public static let headerDateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "EEEE • MMM d"
+        return f
+    }()
+
+    /// Short header format used for Next Week sections
+    public static let shortHeaderDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEE, MMM d"
         return f
     }()
 }

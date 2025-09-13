@@ -12,6 +12,7 @@ struct TaskCard: View {
     let labels: [Label]
     enum LayoutMode { case list, board }
     var layout: LayoutMode = .list
+    var highlighted: Bool = false
     var onToggleCompletion: (() -> Void)?
     var onPauseResume: (() -> Void)? = nil
     var onSkipNext: (() -> Void)? = nil
@@ -19,10 +20,11 @@ struct TaskCard: View {
     var showsRecursIcon: Bool = false
     var subtaskProgress: (completed: Int, total: Int)? = nil
     
-    init(task: Task, labels: [Label], layout: LayoutMode = .list, onToggleCompletion: (() -> Void)? = nil, subtaskProgress: (completed: Int, total: Int)? = nil, showsRecursIcon: Bool = false, onPauseResume: (() -> Void)? = nil, onSkipNext: (() -> Void)? = nil, onGenerateNow: (() -> Void)? = nil) {
+    init(task: Task, labels: [Label], layout: LayoutMode = .list, highlighted: Bool = false, onToggleCompletion: (() -> Void)? = nil, subtaskProgress: (completed: Int, total: Int)? = nil, showsRecursIcon: Bool = false, onPauseResume: (() -> Void)? = nil, onSkipNext: (() -> Void)? = nil, onGenerateNow: (() -> Void)? = nil) {
         self.task = task
         self.labels = labels
         self.layout = layout
+        self.highlighted = highlighted
         self.onToggleCompletion = onToggleCompletion
         self.subtaskProgress = subtaskProgress
         self.showsRecursIcon = showsRecursIcon
@@ -135,7 +137,10 @@ struct TaskCard: View {
         }
         // Compact list rows should look lighter than board cards
         .padding(Spacing.cardPadding - 6)
-        .background(layout == .list ? Colors.surface.opacity(0.02) : Colors.surface)
+        .background({
+            if highlighted { return Colors.surfaceVariant.opacity(0.12) }
+            return layout == .list ? Colors.surface.opacity(0.02) : Colors.surface
+        }())
         .cornerRadius(layout == .list ? Spacing.xSmall : Spacing.small)
         .contextMenu {
             if showsRecursIcon {

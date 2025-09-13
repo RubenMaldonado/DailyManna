@@ -30,4 +30,31 @@ final class WeekPlannerTests: XCTestCase {
     }
 }
 
+extension WeekPlannerTests {
+    func testNextWeekDates_MonToSun() {
+        // Base: Wed 2025-09-10
+        var comps = DateComponents(); comps.year = 2025; comps.month = 9; comps.day = 10; comps.hour = 10
+        let cal = Calendar.current
+        guard let base = cal.date(from: comps) else { return XCTFail("bad date") }
+        let dates = WeekPlanner.datesOfNextWeek(from: base)
+        XCTAssertEqual(dates.count, 7)
+        let nextMon = WeekPlanner.nextMonday(after: base)
+        let nextSun = WeekPlanner.nextSunday(after: base)
+        XCTAssertEqual(dates.first, nextMon)
+        XCTAssertEqual(dates.last, nextSun)
+    }
+
+    func testBuildNextWeekSections_TitlesAndCount() {
+        // Base: Fri 2025-09-12
+        var comps = DateComponents(); comps.year = 2025; comps.month = 9; comps.day = 12; comps.hour = 12
+        let cal = Calendar.current
+        guard let base = cal.date(from: comps) else { return XCTFail("bad date") }
+        let sections = WeekPlanner.buildNextWeekSections(for: base)
+        XCTAssertEqual(sections.count, 7)
+        XCTAssertFalse(sections.first!.isToday)
+        // Ensure titles are non-empty
+        XCTAssertFalse(sections.first!.title.isEmpty)
+    }
+}
+
 

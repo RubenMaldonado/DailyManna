@@ -12,6 +12,9 @@ enum TelemetryEvent: String {
     case taskRescheduledDrag
     case taskRescheduledQuickAction
     case thisWeekSectionToggle
+    // Next Week
+    case nextWeekViewShown
+    case nextWeekSectionToggle
     // Multi-bucket list
     case multiBucketListShown
     case bucketSectionToggle
@@ -24,6 +27,9 @@ enum TelemetryEvent: String {
     case taskCompletedMovedToWorkingLog
     case taskCompletedUndo
     case workingLogExportMarkdown
+    // Auto-bucketing
+    case autoBucketAssigned
+    case autoBucketFlip
 }
 
 enum Telemetry {

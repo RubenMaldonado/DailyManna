@@ -59,6 +59,8 @@ final class TaskListViewModel: ObservableObject {
     private var fetchQueued: Bool = false
     // Feature flag: enable weekday sections inside This Week
     @AppStorage("feature.thisWeekSections") var featureThisWeekSectionsEnabled: Bool = true
+    // Feature flag: enable weekday sections inside Next Week
+    @AppStorage("feature.nextWeekSections") var featureNextWeekSectionsEnabled: Bool = true
     // Collapsed state persistence for per-day sections (keys are yyyy-MM-dd)
     @AppStorage("thisWeek.collapsedDayKeys") private var collapsedDaysRaw: String = ""
     private var collapsedDayKeys: Set<String> {
@@ -68,6 +70,9 @@ final class TaskListViewModel: ObservableObject {
     // Derived sections & grouping for This Week bucket
     @Published var thisWeekSections: [WeekdaySection] = []
     @Published var tasksByDayKey: [String: [(Task, [Label])]] = [:]
+    // Derived sections & grouping for Next Week bucket
+    @Published var nextWeekSections: [WeekdaySection] = []
+    @Published var tasksByNextWeekDayKey: [String: [(Task, [Label])]] = [:]
     
     init(taskUseCases: TaskUseCases, labelUseCases: LabelUseCases, userId: UUID, syncService: SyncService? = nil, recurrenceUseCases: RecurrenceUseCases? = nil) {
         self.taskUseCases = taskUseCases
@@ -234,9 +239,8 @@ final class TaskListViewModel: ObservableObject {
             let parentIds = pairs.map { $0.0.id }
             await loadSubtaskProgressIncremental(for: parentIds)
             // Derive weekday sections/groupings when relevant
-            if featureThisWeekSectionsEnabled {
-                deriveThisWeekSectionsAndGroups()
-            }
+            if featureThisWeekSectionsEnabled { deriveThisWeekSectionsAndGroups() }
+            if featureNextWeekSectionsEnabled { deriveNextWeekSectionsAndGroups() }
         } catch {
             errorMessage = "Failed to fetch tasks: \(error.localizedDescription)"
             Logger.shared.error("Failed to fetch tasks", category: .ui, error: error)
@@ -347,6 +351,7 @@ final class TaskListViewModel: ObservableObject {
             async let counts: Void = self.refreshCounts()
             _ = await (fetch, counts)
             if self.featureThisWeekSectionsEnabled { self.deriveThisWeekSectionsAndGroups() }
+            if self.featureNextWeekSectionsEnabled { self.deriveNextWeekSectionsAndGroups() }
         }
     }
 
@@ -533,7 +538,10 @@ final class TaskListViewModel: ObservableObject {
     func save(draft: TaskDraft) async {
         do {
             if let editing = editingTask {
-                let updated = draft.applying(to: editing)
+                var localDraft = draft
+                // Client auto-bucketing guard
+                if let due = localDraft.dueAt { localDraft.bucket = computeAutoBucket(for: due) }
+                let updated = localDraft.applying(to: editing)
                 try await taskUseCases.updateTask(updated)
                 if let due = updated.dueAt, !updated.isCompleted {
                     let scheduleAt: Date = {
@@ -563,7 +571,10 @@ final class TaskListViewModel: ObservableObject {
                     pendingRecurrenceSelections.removeValue(forKey: updated.id)
                 }
             } else {
-                let newTask = draft.toNewTask()
+                var localDraft = draft
+                // Client auto-bucketing guard
+                if let due = localDraft.dueAt { localDraft.bucket = computeAutoBucket(for: due) }
+                let newTask = localDraft.toNewTask()
                 try await taskUseCases.createTask(newTask)
                 NotificationCenter.default.post(name: Notification.Name("dm.task.created"), object: nil, userInfo: ["taskId": newTask.id])
                 lastCreatedTaskId = newTask.id
@@ -599,6 +610,23 @@ final class TaskListViewModel: ObservableObject {
             errorMessage = "Failed to save task: \(error.localizedDescription)"
             Logger.shared.error("Failed to save task", category: .ui, error: error)
         }
+    }
+
+    /// Compute the appropriate bucket for a given due date based on current local week rules
+    private func computeAutoBucket(for dueAt: Date, now: Date = Date()) -> TimeBucket {
+        let cal = Calendar.current
+        let startDue = cal.startOfDay(for: dueAt)
+        let weekMonday = WeekPlanner.mondayOfCurrentWeek(for: now, calendar: cal)
+        let weekFriday = WeekPlanner.fridayOfCurrentWeek(for: now, calendar: cal)
+        let weekend = WeekPlanner.saturdayAndSundayOfCurrentWeek(for: now, calendar: cal)
+        let nextMon = WeekPlanner.nextMonday(after: now, calendar: cal)
+        let nextSun = WeekPlanner.nextSunday(after: now, calendar: cal)
+        if startDue >= weekMonday && startDue <= weekFriday { Telemetry.record(.autoBucketAssigned, metadata: ["bucket": TimeBucket.thisWeek.rawValue]); return .thisWeek }
+        if startDue == weekend.saturday || startDue == weekend.sunday { Telemetry.record(.autoBucketAssigned, metadata: ["bucket": TimeBucket.weekend.rawValue]); return .weekend }
+        if startDue >= nextMon && startDue <= nextSun { Telemetry.record(.autoBucketAssigned, metadata: ["bucket": TimeBucket.nextWeek.rawValue]); return .nextWeek }
+        if startDue > nextSun { Telemetry.record(.autoBucketAssigned, metadata: ["bucket": TimeBucket.nextMonth.rawValue]); return .nextMonth }
+        // Fallback (should not hit): treat as this week
+        return .thisWeek
     }
 
     private func makeDraftForBucket(_ bucket: TimeBucket) -> TaskDraft {
@@ -813,26 +841,52 @@ final class TaskListViewModel: ObservableObject {
         var grouped: [String: [(Task,[Label])]] = [:]
         let cal = Calendar.current
         let startToday = cal.startOfDay(for: now)
+        let weekMonday = WeekPlanner.mondayOfCurrentWeek(for: now, calendar: cal)
+        let weekFriday = WeekPlanner.fridayOfCurrentWeek(for: now, calendar: cal)
+        let weekend = WeekPlanner.saturdayAndSundayOfCurrentWeek(for: now, calendar: cal)
         for pair in tasksWithLabels {
             let task = pair.0
-            guard task.bucketKey == .thisWeek, task.isCompleted == false else { continue }
-            if let due = task.dueAt {
-                let startDue = cal.startOfDay(for: due)
-                if startDue == startToday {
-                    let key = WeekPlanner.isoDayKey(for: startToday)
-                    grouped[key, default: []].append(pair)
-                } else if startDue < startToday {
-                    // overdue goes to Today
-                    let key = WeekPlanner.isoDayKey(for: startToday)
-                    grouped[key, default: []].append(pair)
-                } else {
-                    // Future days Mon–Fri only
-                    let key = WeekPlanner.isoDayKey(for: startDue)
-                    grouped[key, default: []].append(pair)
-                }
+            guard task.isCompleted == false else { continue }
+            guard let due = task.dueAt else { continue }
+            let startDue = cal.startOfDay(for: due)
+            // Exclude weekend days from This Week sections
+            if startDue == weekend.saturday || startDue == weekend.sunday { continue }
+            if startDue == startToday || startDue < startToday {
+                // Today includes overdue
+                let key = WeekPlanner.isoDayKey(for: startToday)
+                grouped[key, default: []].append(pair)
+            } else if startDue >= weekMonday && startDue <= weekFriday {
+                let key = WeekPlanner.isoDayKey(for: startDue)
+                grouped[key, default: []].append(pair)
             }
         }
         tasksByDayKey = grouped
+    }
+
+    // MARK: - Next Week sections & grouping (Mon–Sun)
+    private func deriveNextWeekSectionsAndGroups() {
+        guard selectedBucket == .nextWeek else {
+            nextWeekSections = []
+            tasksByNextWeekDayKey = [:]
+            return
+        }
+        let now = Date()
+        let sections = WeekPlanner.buildNextWeekSections(for: now)
+        nextWeekSections = sections
+        var grouped: [String: [(Task,[Label])]] = [:]
+        let cal = Calendar.current
+        for pair in tasksWithLabels {
+            let task = pair.0
+            guard task.isCompleted == false else { continue }
+            guard let due = task.dueAt else { continue }
+            let startDue = cal.startOfDay(for: due)
+            let key = WeekPlanner.isoDayKey(for: startDue)
+            if sections.contains(where: { $0.id == key }) {
+                grouped[key, default: []].append(pair)
+            }
+        }
+        tasksByNextWeekDayKey = grouped
+        Telemetry.record(.nextWeekViewShown)
     }
 
     func toggleSectionCollapsed(for dayKey: String) {
