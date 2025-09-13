@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import XCTest
 @testable import DailyManna
 
@@ -10,12 +11,16 @@ final class SyncServiceTests: XCTestCase {
         let localLabels = container.labelsRepository
         let remoteTasks = FakeRemoteTasksRepository()
         let remoteLabels = FakeRemoteLabelsRepository()
+        let localWorking = SwiftDataWorkingLogRepository(modelContext: ModelContext(container.modelContainer))
+        let remoteWorking = FakeRemoteWorkingLogRepository()
         let sync = SyncService(
             localTasksRepository: localTasks,
             remoteTasksRepository: remoteTasks,
             localLabelsRepository: localLabels,
             remoteLabelsRepository: remoteLabels,
-            syncStateStore: container.syncStateStore
+            syncStateStore: container.syncStateStore,
+            localWorkingLogRepository: localWorking,
+            remoteWorkingLogRepository: remoteWorking
         )
         let user = TestFactories.userId(1)
         var t = TestFactories.task(userId: user)
@@ -32,12 +37,16 @@ final class SyncServiceTests: XCTestCase {
         let localLabels = container.labelsRepository
         let remoteTasks = FakeRemoteTasksRepository()
         let remoteLabels = FakeRemoteLabelsRepository()
+        let localWorking = SwiftDataWorkingLogRepository(modelContext: ModelContext(container.modelContainer))
+        let remoteWorking = FakeRemoteWorkingLogRepository()
         let sync = SyncService(
             localTasksRepository: localTasks,
             remoteTasksRepository: remoteTasks,
             localLabelsRepository: localLabels,
             remoteLabelsRepository: remoteLabels,
-            syncStateStore: container.syncStateStore
+            syncStateStore: container.syncStateStore,
+            localWorkingLogRepository: localWorking,
+            remoteWorkingLogRepository: remoteWorking
         )
         let user = TestFactories.userId(1)
         var local = TestFactories.task(userId: user, title: "local")

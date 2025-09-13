@@ -25,6 +25,8 @@ final class TaskListViewModel: ObservableObject {
     @Published var editingTask: Task? = nil
     @Published var pendingDelete: Task? = nil
     @Published var isBoardModeActive: Bool = false
+    // When true, list mode should fetch across all buckets (explicitly all-buckets)
+    @Published var forceAllBuckets: Bool = false
     @Published var syncErrorMessage: String? = nil
     @Published var prefilledDraft: TaskDraft? = nil
     @Published var lastCreatedTaskId: UUID? = nil
@@ -126,7 +128,8 @@ final class TaskListViewModel: ObservableObject {
                     self.recurrenceCacheDirty = true
                     _Concurrency.Task {
                         await self.refreshCounts()
-                        await self.fetchTasks(in: self.isBoardModeActive ? nil : self.selectedBucket, showLoading: false)
+                        let filter: TimeBucket? = (self.forceAllBuckets || self.isBoardModeActive) ? nil : self.selectedBucket
+                        await self.fetchTasks(in: filter, showLoading: false)
                     }
                 }
                 .store(in: &cancellables)
@@ -141,7 +144,12 @@ final class TaskListViewModel: ObservableObject {
         }
         fetchInFlight = true
         // Keep sync view context aligned with current UI
-        let effectiveBucket: TimeBucket? = isBoardModeActive ? nil : (bucket ?? selectedBucket)
+        // If an explicit bucket is provided, honor it (including nil = all buckets)
+        // Otherwise, default to selectedBucket unless an all-buckets mode is active (board)
+        let effectiveBucket: TimeBucket? = {
+            if let explicit = bucket { return explicit }
+            return (forceAllBuckets || isBoardModeActive) ? nil : selectedBucket
+        }()
         let bucketKey = effectiveBucket?.rawValue
         let dueBy = availableOnly ? availableCutoffEndOfToday() : nil
         syncService?.setViewContext(bucketKey: bucketKey, dueBy: dueBy)
@@ -347,10 +355,10 @@ final class TaskListViewModel: ObservableObject {
         let now = Date()
         let comps = calendar.dateComponents([.year, .month, .day], from: now)
         let dayKey = "\(comps.year ?? 0)-\(comps.month ?? 0)-\(comps.day ?? 0)"
-        if let cached = availableCutoffCache, cached.dayKey == dayKey {
-            return cached.cutoff
-        }
-        let cutoff = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: now) ?? now
+        if let cached = availableCutoffCache, cached.dayKey == dayKey { return cached.cutoff }
+        // Use start of tomorrow (midnight next day) as inclusive cutoff for date-only due dates
+        let startToday = calendar.startOfDay(for: now)
+        let cutoff = calendar.date(byAdding: .day, value: 1, to: startToday) ?? now
         availableCutoffCache = (dayKey, cutoff)
         return cutoff
     }

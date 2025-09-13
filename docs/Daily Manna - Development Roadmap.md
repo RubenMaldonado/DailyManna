@@ -430,6 +430,32 @@ This document outlines a prioritized, iterative development approach for Daily M
 - Working Log Items CRUD with soft delete; optional hard delete from Settings.
 - Sync, RLS, and Realtime verified; export to Markdown works; tests green; docs published.
 
+### Epic 2.8: All-Buckets List View (Vertical Sections)
+**Priority**: Medium-High
+**Estimated Effort**: 1–1.5 weeks
+**Goal**: Replace the single-bucket list and bucket picker with one vertically scrolling list showing all buckets as sections, each with header, count, and add action. Filters apply globally; drag-and-drop works within and across buckets. This preserves the "This Week" weekday subsections inside that section when enabled.
+
+**User Stories & Acceptance Criteria**:
+- [ ] See all buckets in one page with pinned headers and counts; add task per section.
+- [ ] No bucket picker/menu in list mode; board toggle remains.
+- [ ] Global filters refresh all sections.
+- [ ] Drag-and-drop reorders within a bucket and moves across buckets (including empty sections) with optimistic UI.
+- [ ] Deep-link and post-create scroll-to target task in unified list.
+- [ ] “This Week” renders weekday subsections only inside that section (feature-flagged).
+
+**Implementation Plan (high-level)**:
+- Create `AllBucketsListView` with single `ScrollView` + `LazyVStack`.
+- Extract non-scrolling `TasksListContent` from `TasksListView`.
+- In list mode, fetch with `bucket=nil`; update filter/deeplink handlers.
+- Hide bucket picker/menu in list mode; keep board toggle.
+- Enable cross-bucket drop handling invoking `reorder(taskId:to:targetIndex:)`.
+- Add collapsible bucket sections and pinned headers.
+- Align bucket ordering with the board view.
+- Telemetry for multi-bucket list shown, per-bucket add, and bucket section toggles.
+
+**References**:
+- `docs/Epic 2.8 - All-Buckets List View.md`
+
 ---
 
 ## Phase 3: Advanced Features & Polish (Weeks 15-20)

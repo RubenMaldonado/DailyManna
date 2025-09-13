@@ -1,6 +1,7 @@
 import XCTest
 @testable import DailyManna
 
+@MainActor
 final class TaskListViewModelSectionsTests: XCTestCase {
     func makeViewModel() throws -> TaskListViewModel {
         let deps = Dependencies.shared

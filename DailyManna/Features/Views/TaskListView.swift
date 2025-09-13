@@ -65,8 +65,7 @@ struct TaskListView: View {
         VStack(spacing: 0) {
             syncErrorBanner.typeErased()
             pendingDeleteBanner.typeErased()
-            headerBar.typeErased()
-            bucketHeaderIfNeeded.typeErased()
+            // Bucket header removed in multi-bucket list mode
             activeFiltersRow.typeErased()
             contentSection.typeErased()
             Spacer(minLength: 0)
@@ -77,7 +76,10 @@ struct TaskListView: View {
         // Leave header in its natural position; content manages split with panel on the side
         .task {
             await viewModel.refreshCounts()
-            await viewModel.fetchTasks(in: viewModel.selectedBucket)
+            // Enable explicit all-buckets mode for the unified list
+            viewModel.forceAllBuckets = true
+            // Fetch all buckets for list mode; board also uses all buckets
+            await viewModel.fetchTasks(in: nil)
             await viewModel.initialSyncIfNeeded()
             viewModel.startPeriodicSync()
             await loadLabels()
@@ -91,9 +93,7 @@ struct TaskListView: View {
                 viewModel.stopPeriodicSync()
             }
         }
-        .onAppear {
-            _Concurrency.Task { await viewModel.fetchTasks(in: viewModel.selectedBucket) }
-        }
+        .onAppear { _Concurrency.Task { viewModel.forceAllBuckets = true; await viewModel.fetchTasks(in: nil) } }
         #if !os(macOS)
         .onChange(of: viewMode) { _, newMode in
             Logger.shared.info("View mode changed -> \(newMode.rawValue)", category: .ui)
@@ -108,16 +108,23 @@ struct TaskListView: View {
                 viewModel.setAvailableFilter(enabled)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("dm.toolbar.openFilter"))) { _ in
+            let now = Date().timeIntervalSince1970
+            if now - lastFilterOpenAt < 0.3 { return }
+            lastFilterOpenAt = now
+            if showFilterSheet == false { DispatchQueue.main.async { showFilterSheet = true } }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("dm.toolbar.openSettings"))) { _ in
+            if showSettings == false { DispatchQueue.main.async { showSettings = true } }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("dm.toolbar.newTask"))) { _ in
+            viewModel.presentCreateForm()
+        }
         #if os(macOS)
         .onChange(of: viewModeStore.mode) { _, mode in
             _Concurrency.Task {
-                if mode == .board {
-                    viewModel.isBoardModeActive = true
-                    await viewModel.fetchTasks(in: nil)
-                } else {
-                    viewModel.isBoardModeActive = false
-                    await viewModel.fetchTasks(in: viewModel.selectedBucket)
-                }
+                viewModel.isBoardModeActive = (mode == .board)
+                await viewModel.fetchTasks(in: nil)
             }
             Logger.shared.info("View mode changed -> \(mode.rawValue)", category: .ui)
             Telemetry.record(.viewSwitch, metadata: ["mode": mode.rawValue])
@@ -147,7 +154,7 @@ struct TaskListView: View {
                 savedFilters: savedFilters,
                 onApply: {
                     Telemetry.record(.filterApply)
-                    _Concurrency.Task { await viewModel.fetchTasks(in: viewModel.selectedBucket) }
+                    _Concurrency.Task { await viewModel.fetchTasks(in: nil) }
                 },
                 onClear: {
                     viewModel.clearFilters()
@@ -223,14 +230,9 @@ struct TaskListView: View {
         #endif
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("dm.open.task"))) { note in
             if let id = note.userInfo?["taskId"] as? UUID {
-                if let bucketStr = note.userInfo?["bucket_key"] as? String, let bucket = TimeBucket(rawValue: bucketStr) {
-                    viewModel.selectedBucket = bucket
-                }
                 _Concurrency.Task {
-                    await viewModel.fetchTasks(in: viewModel.selectedBucket)
-                    if let task = viewModel.tasksWithLabels.first(where: { $0.0.id == id })?.0 {
-                        viewModel.presentEditForm(task: task)
-                    }
+                    await viewModel.fetchTasks(in: nil)
+                    if let task = viewModel.tasksWithLabels.first(where: { $0.0.id == id })?.0 { viewModel.presentEditForm(task: task) }
                 }
             }
         }
@@ -298,32 +300,9 @@ struct TaskListView: View {
                 } else if let errorMessage = viewModel.errorMessage {
                     Banner(kind: .error, message: errorMessage)
                         .padding(.horizontal)
-                } else if viewModel.tasksWithLabels.isEmpty {
-                    EmptyStateView(bucketName: viewModel.selectedBucket.displayName)
-                        .padding(.horizontal)
                 } else {
-                    if viewModel.featureThisWeekSectionsEnabled && viewModel.selectedBucket == .thisWeek {
-                        ThisWeekSectionsListView(
-                            viewModel: viewModel,
-                            onToggle: { task in _Concurrency.Task { await viewModel.toggleTaskCompletion(task: task) } },
-                            onEdit: { task in viewModel.presentEditForm(task: task) },
-                            onDelete: { task in viewModel.confirmDelete(task) }
-                        )
-                        .onAppear { Telemetry.record(.thisWeekViewShown, metadata: ["view": "list"]) }
+                    AllBucketsListView(viewModel: viewModel, userId: userId)
                         .transaction { $0.disablesAnimations = true }
-                    } else {
-                        TasksListView(
-                            bucket: viewModel.selectedBucket,
-                            tasksWithLabels: viewModel.tasksWithLabels,
-                            subtaskProgressByParent: viewModel.subtaskProgressByParent,
-                            onToggle: { task in _Concurrency.Task { await viewModel.toggleTaskCompletion(task: task) } },
-                            onEdit: { task in viewModel.presentEditForm(task: task) },
-                            onMove: { taskId, bucket in _Concurrency.Task { await viewModel.move(taskId: taskId, to: bucket) } },
-                            onReorder: { taskId, targetIndex in _Concurrency.Task { await viewModel.reorder(taskId: taskId, to: viewModel.selectedBucket, targetIndex: targetIndex) } },
-                            onDelete: { task in viewModel.confirmDelete(task) }
-                        )
-                        .transaction { $0.disablesAnimations = true }
-                    }
                 }
                 if workingLogVM.isOpen {
                     Divider()
@@ -415,7 +394,7 @@ private extension TaskListView {
                 isSyncing: viewModel.isSyncing,
                 userId: userId,
                 selectedBucket: viewModel.selectedBucket,
-                showBucketMenu: currentViewMode != .board,
+                showBucketMenu: false,
                 onSelectBucket: { bucket in
                     Logger.shared.info("Toolbar select bucket=\(bucket.rawValue)", category: .ui)
                     Telemetry.record(.bucketChange, metadata: ["bucket": bucket.rawValue])
@@ -472,7 +451,7 @@ private extension TaskListView {
                 selectedLabelIds: viewModel.activeFilterLabelIds,
                 availableOnly: viewModel.availableOnly,
                 unlabeledOnly: viewModel.unlabeledOnly,
-                onRemoveLabel: { id in viewModel.activeFilterLabelIds.remove(id); _Concurrency.Task { await viewModel.fetchTasks(in: viewModel.selectedBucket) } },
+                onRemoveLabel: { id in viewModel.activeFilterLabelIds.remove(id); _Concurrency.Task { await viewModel.fetchTasks(in: nil) } },
                 onClearAll: { viewModel.clearFilters() }
             )
             .padding(.horizontal)

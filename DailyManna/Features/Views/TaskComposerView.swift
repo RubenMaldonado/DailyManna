@@ -27,10 +27,28 @@ struct TaskComposerView: View {
                 .font(.title2)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { submit() }
-            // Description (auto-growing single-line style)
+            // Description (native multi-line, 3x taller by default)
+            #if os(macOS)
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: Binding(get: { draft.description ?? "" }, set: { draft.description = $0 }))
+                    .font(.body)
+                    .frame(minHeight: 130)
+                if (draft.description ?? "").isEmpty {
+                    Text("Add details…")
+                        .foregroundStyle(Colors.onSurfaceVariant)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 8)
+                }
+            }
+            .background(Colors.surface)
+            .cornerRadius(8)
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Colors.outline))
+            #else
             TextField("Add details…", text: Binding(get: { draft.description ?? "" }, set: { draft.description = $0 }), axis: .vertical)
                 .textFieldStyle(.roundedBorder)
-                .lineLimit(1...6)
+                .lineLimit(5...18)
+                .frame(minHeight: 130)
+            #endif
             // Chips area (wraps to next line when needed)
             ChipsFlow(spacing: 8, lineSpacing: 8) {
                 chipView(icon: "tag", text: labelsChipText(), isActive: !selectedLabelIds.isEmpty, activeColor: nil, onTap: { showLabels = true }, onClear: { selectedLabelIds.removeAll() })

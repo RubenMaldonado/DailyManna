@@ -17,33 +17,24 @@ struct TaskListScreenIOS: View {
     @State private var lastFilterOpenAt: TimeInterval = 0
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 8) {
             if let syncError = viewModel.syncErrorMessage { errorBanner(syncError) }
             if let t = viewModel.pendingDelete { pendingDeleteBanner(t) }
-            headerBar()
-            if viewMode != .board {
-                BucketHeader(
-                    bucket: viewModel.selectedBucket,
-                    count: viewModel.bucketCounts[viewModel.selectedBucket] ?? 0,
-                    onAdd: {
-                        let draft = makeDraftForBucket(viewModel.selectedBucket)
-                        viewModel.presentCreateForm()
-                        NotificationCenter.default.post(name: Notification.Name("dm.prefill.draft"), object: nil, userInfo: ["draftId": draft.id])
-                    }
-                )
-                .padding(.horizontal)
-            }
+            // Bucket header removed in multi-bucket list mode
             if hasActiveFilters { filtersRow() }
             content()
             Spacer(minLength: 0)
         }
         .background(Colors.background)
+        .navigationTitle("Daily Manna")
+        .navigationBarTitleDisplayMode(.inline)
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("dm.prefill.draft"))) { note in
             // no-op: placeholder if later we want to set local state
         }
         .task {
             await viewModel.refreshCounts()
-            await viewModel.fetchTasks(in: viewModel.selectedBucket)
+            viewModel.forceAllBuckets = true
+            await viewModel.fetchTasks(in: nil)
             await viewModel.initialSyncIfNeeded()
             viewModel.startPeriodicSync()
             await loadLabels()
@@ -57,7 +48,7 @@ struct TaskListScreenIOS: View {
                 viewModel.stopPeriodicSync()
             }
         }
-        .onAppear { _Concurrency.Task { await viewModel.fetchTasks(in: viewModel.selectedBucket) } }
+        .onAppear { _Concurrency.Task { viewModel.forceAllBuckets = true; await viewModel.fetchTasks(in: nil) } }
         .onChange(of: viewMode) { _, newMode in
             Logger.shared.info("View mode changed -> \(newMode.rawValue)", category: .ui)
             Telemetry.record(.viewSwitch, metadata: ["mode": newMode.rawValue])
@@ -72,9 +63,8 @@ struct TaskListScreenIOS: View {
         .toolbar { toolbarContent() }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("dm.open.task"))) { note in
             if let id = note.userInfo?["taskId"] as? UUID {
-                if let bucketStr = note.userInfo?["bucket_key"] as? String, let bucket = TimeBucket(rawValue: bucketStr) { viewModel.selectedBucket = bucket }
                 _Concurrency.Task {
-                    await viewModel.fetchTasks(in: viewModel.selectedBucket)
+                    await viewModel.fetchTasks(in: nil)
                     if let task = viewModel.tasksWithLabels.first(where: { $0.0.id == id })?.0 { viewModel.presentEditForm(task: task) }
                 }
             }
@@ -102,31 +92,7 @@ struct TaskListScreenIOS: View {
             }
     }
 
-    @ViewBuilder private func headerBar() -> some View {
-        TaskListHeader(
-            onNew: { viewModel.presentCreateForm() },
-            onSyncNow: { _Concurrency.Task { await viewModel.sync() } },
-            isSyncing: viewModel.isSyncing,
-            userId: userId,
-            selectedBucket: viewModel.selectedBucket,
-            showBucketMenu: viewMode != .board,
-            onSelectBucket: { bucket in
-                Logger.shared.info("Toolbar select bucket=\(bucket.rawValue)", category: .ui)
-                Telemetry.record(.bucketChange, metadata: ["bucket": bucket.rawValue])
-                viewModel.select(bucket: bucket)
-            },
-            onOpenFilter: {
-                Logger.shared.info("Open filter sheet", category: .ui)
-                Telemetry.record(.filterOpen)
-                let now = Date().timeIntervalSince1970
-                if now - lastFilterOpenAt < 0.3 { return }
-                lastFilterOpenAt = now
-                if showFilterSheet == false { DispatchQueue.main.async { showFilterSheet = true } }
-            },
-            activeFilterCount: (viewModel.availableOnly ? 1 : 0) + (viewModel.unlabeledOnly ? 1 : 0) + viewModel.activeFilterLabelIds.count,
-            onOpenSettings: { showSettings = true }
-        )
-    }
+    @ViewBuilder private func headerBar() -> some View { EmptyView() }
 
     @ViewBuilder private func filtersRow() -> some View {
         ActiveFiltersChipsIOS(
@@ -147,50 +113,110 @@ struct TaskListScreenIOS: View {
         } else if let error = viewModel.errorMessage {
             Banner(kind: .error, message: error)
                 .padding(.horizontal)
-        } else if viewModel.tasksWithLabels.isEmpty {
-            EmptyStateViewIOS(bucketName: viewModel.selectedBucket.displayName)
-                .padding(.horizontal)
-        } else if viewModel.featureThisWeekSectionsEnabled && viewModel.selectedBucket == .thisWeek {
-            ThisWeekSectionsListView(
-                viewModel: viewModel,
-                onToggle: { task in _Concurrency.Task { await viewModel.toggleTaskCompletion(task: task) } },
-                onEdit: { task in viewModel.presentEditForm(task: task) },
-                onDelete: { task in viewModel.confirmDelete(task) }
-            )
-            .onAppear { Telemetry.record(.thisWeekViewShown, metadata: ["view": "list"]) }
-            .transaction { $0.disablesAnimations = true }
         } else {
-            TasksListView(
-                bucket: viewModel.selectedBucket,
-                tasksWithLabels: viewModel.tasksWithLabels,
-                subtaskProgressByParent: viewModel.subtaskProgressByParent,
-                onToggle: { task in _Concurrency.Task { await viewModel.toggleTaskCompletion(task: task) } },
-                onEdit: { task in viewModel.presentEditForm(task: task) },
-                onMove: { taskId, bucket in _Concurrency.Task { await viewModel.move(taskId: taskId, to: bucket) } },
-                onReorder: { taskId, targetIndex in _Concurrency.Task { await viewModel.reorder(taskId: taskId, to: viewModel.selectedBucket, targetIndex: targetIndex) } },
-                onDelete: { task in viewModel.confirmDelete(task) }
-            )
-            .transaction { $0.disablesAnimations = true }
+            if viewMode == .board {
+                // board view remains separate on iOS
+                // reuse existing single-bucket path for now to avoid duplicate board implementation here
+                TasksListView(
+                    bucket: viewModel.selectedBucket,
+                    tasksWithLabels: viewModel.tasksWithLabels,
+                    subtaskProgressByParent: viewModel.subtaskProgressByParent,
+                    onToggle: { task in _Concurrency.Task { await viewModel.toggleTaskCompletion(task: task) } },
+                    onEdit: { task in viewModel.presentEditForm(task: task) },
+                    onMove: { taskId, bucket in _Concurrency.Task { await viewModel.move(taskId: taskId, to: bucket) } },
+                    onReorder: { taskId, targetIndex in _Concurrency.Task { await viewModel.reorder(taskId: taskId, to: viewModel.selectedBucket, targetIndex: targetIndex) } },
+                    onDelete: { task in viewModel.confirmDelete(task) }
+                )
+                .transaction { $0.disablesAnimations = true }
+            } else {
+                AllBucketsListView(viewModel: viewModel, userId: userId)
+                    .transaction { $0.disablesAnimations = true }
+            }
         }
     }
 
     @ToolbarContentBuilder private func toolbarContent() -> some ToolbarContent {
+        // Leading: compact sync status chip
+        ToolbarItem(placement: .topBarLeading) {
+            SyncStatusView(isSyncing: viewModel.isSyncing)
+        }
+        // Trailing: responsive actions
         ToolbarItem(placement: .topBarTrailing) {
             if hSizeClass == .regular {
                 HStack(spacing: 8) {
-                    Button { viewMode = .list } label: { Image(systemName: "list.bullet") }
-                        .buttonStyle(viewMode == .list ? AnyButtonStyle(PrimaryButtonStyle(size: .small)) : AnyButtonStyle(SecondaryButtonStyle(size: .small)))
-                        .keyboardShortcut("1", modifiers: .command)
-                    Button { viewMode = .board } label: { Image(systemName: "rectangle.grid.2x2") }
-                        .buttonStyle(viewMode == .board ? AnyButtonStyle(PrimaryButtonStyle(size: .small)) : AnyButtonStyle(SecondaryButtonStyle(size: .small)))
-                        .keyboardShortcut("2", modifiers: .command)
+                    // View switcher (List | Board)
+                    HStack(spacing: 8) {
+                        Button { viewMode = .list } label: { Image(systemName: "list.bullet") }
+                            .buttonStyle(viewMode == .list ? AnyButtonStyle(PrimaryButtonStyle(size: .small)) : AnyButtonStyle(SecondaryButtonStyle(size: .small)))
+                            .keyboardShortcut("1", modifiers: .command)
+                        Button { viewMode = .board } label: { Image(systemName: "rectangle.grid.2x2") }
+                            .buttonStyle(viewMode == .board ? AnyButtonStyle(PrimaryButtonStyle(size: .small)) : AnyButtonStyle(SecondaryButtonStyle(size: .small)))
+                            .keyboardShortcut("2", modifiers: .command)
+                    }
+                    // Filter button with active count
+                    Button(action: {
+                        Logger.shared.info("Open filter sheet", category: .ui)
+                        Telemetry.record(.filterOpen)
+                        let now = Date().timeIntervalSince1970
+                        if now - lastFilterOpenAt < 0.3 { return }
+                        lastFilterOpenAt = now
+                        if showFilterSheet == false { DispatchQueue.main.async { showFilterSheet = true } }
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "line.3.horizontal.decrease.circle")
+                            let count = (viewModel.availableOnly ? 1 : 0) + (viewModel.unlabeledOnly ? 1 : 0) + viewModel.activeFilterLabelIds.count
+                            if count > 0 { CountBadge(count: count) }
+                        }
+                    }
+                    .buttonStyle(SecondaryButtonStyle(size: .small))
+                    // Primary add button
+                    Button(action: { viewModel.presentCreateForm() }) {
+                        SwiftUI.Label("New Task", systemImage: "plus.circle.fill")
+                    }
+                    .buttonStyle(PrimaryButtonStyle(size: .small))
+                    // Overflow menu
+                    Menu {
+                        // View submenu
+                        Menu("View") {
+                            Button(action: { viewMode = .list }) { SwiftUI.Label("List", systemImage: "list.bullet"); if viewMode == .list { Image(systemName: "checkmark") } }
+                            Button(action: { viewMode = .board }) { SwiftUI.Label("Board", systemImage: "rectangle.grid.2x2"); if viewMode == .board { Image(systemName: "checkmark") } }
+                            Divider()
+                            Button(viewModel.showCompleted ? "Hide Completed" : "Show Completed") { viewModel.showCompleted.toggle(); _Concurrency.Task { await viewModel.fetchTasks(in: nil) } }
+                        }
+                        Divider()
+                        Button("Sync now") { _Concurrency.Task { await viewModel.sync() } }
+                        Button("Settings") { showSettings = true }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .menuStyle(.borderlessButton)
                 }
             } else {
-                Menu {
-                    Button(action: { viewMode = .list }) { SwiftUI.Label("List", systemImage: "list.bullet"); if viewMode == .list { Image(systemName: "checkmark") } }
-                    Button(action: { viewMode = .board }) { SwiftUI.Label("Board", systemImage: "rectangle.grid.2x2"); if viewMode == .board { Image(systemName: "checkmark") } }
-                } label: { Image(systemName: viewMode == .list ? "list.bullet" : "rectangle.grid.2x2") }
-                .menuStyle(.borderlessButton)
+                HStack(spacing: 8) {
+                    Button(action: { viewModel.presentCreateForm() }) { Image(systemName: "plus") }
+                        .buttonStyle(PrimaryButtonStyle(size: .small))
+                    Menu {
+                        Button("Filter…") {
+                            Logger.shared.info("Open filter sheet", category: .ui)
+                            Telemetry.record(.filterOpen)
+                            let now = Date().timeIntervalSince1970
+                            if now - lastFilterOpenAt < 0.3 { return }
+                            lastFilterOpenAt = now
+                            if showFilterSheet == false { DispatchQueue.main.async { showFilterSheet = true } }
+                        }
+                        Menu("View") {
+                            Button(action: { viewMode = .list }) { SwiftUI.Label("List", systemImage: "list.bullet"); if viewMode == .list { Image(systemName: "checkmark") } }
+                            Button(action: { viewMode = .board }) { SwiftUI.Label("Board", systemImage: "rectangle.grid.2x2"); if viewMode == .board { Image(systemName: "checkmark") } }
+                        }
+                        Button(viewModel.showCompleted ? "Hide Completed" : "Show Completed") { viewModel.showCompleted.toggle(); _Concurrency.Task { await viewModel.fetchTasks(in: nil) } }
+                        Divider()
+                        Button("Sync now") { _Concurrency.Task { await viewModel.sync() } }
+                        Button("Settings") { showSettings = true }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .menuStyle(.borderlessButton)
+                }
             }
         }
     }
@@ -214,7 +240,7 @@ struct TaskListScreenIOS: View {
             unlabeledOnly: $viewModel.unlabeledOnly,
             matchAll: $viewModel.matchAll,
             savedFilters: savedFilters,
-            onApply: { Telemetry.record(.filterApply); _Concurrency.Task { await viewModel.fetchTasks(in: viewModel.selectedBucket) } },
+            onApply: { Telemetry.record(.filterApply); _Concurrency.Task { await viewModel.fetchTasks(in: nil) } },
             onClear: { viewModel.clearFilters(); Telemetry.record(.filterClear) }
         )
     }

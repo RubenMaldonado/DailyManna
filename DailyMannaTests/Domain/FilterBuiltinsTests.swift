@@ -21,7 +21,8 @@ final class FilterBuiltinsTests: XCTestCase {
         let vm = await makeViewModel(userId: userId)
         vm.availableOnly = true
 
-        let endOfToday = Calendar.current.date(bySettingHour: 23, minute: 59, second: 59, of: now)!
+        // Inclusive cutoff should be start of tomorrow (midnight next day)
+        let endOfToday = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: now))!
         func effectiveDue(_ t: Task) -> Date? {
             guard let due = t.dueAt else { return nil }
             if t.dueHasTime { return due }

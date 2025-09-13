@@ -10,6 +10,7 @@ struct MacToolbarHost: View {
     var body: some View {
         TaskListView(viewModel: viewModel, userId: userId)
             .toolbar {
+                // View switcher
                 ToolbarItem(placement: .automatic) {
                     Picker("View", selection: $viewModeStore.mode) {
                         Image(systemName: "list.bullet").tag(TaskListView.ViewMode.list)
@@ -19,10 +20,41 @@ struct MacToolbarHost: View {
                     .frame(width: 140)
                     .accessibilityIdentifier("toolbar.viewMode")
                 }
+                // Leading status
+                ToolbarItem(placement: .status) {
+                    SyncStatusView(isSyncing: viewModel.isSyncing)
+                }
+                // Primary add
+                ToolbarItem(placement: .primaryAction) {
+                    Button { NotificationCenter.default.post(name: Notification.Name("dm.toolbar.newTask"), object: nil) } label: { SwiftUI.Label("New Task", systemImage: "plus.circle.fill") }
+                        .buttonStyle(PrimaryButtonStyle(size: .small))
+                        .keyboardShortcut("n", modifiers: .command)
+                }
+                // Filter button with count
                 ToolbarItem(placement: .automatic) {
-                    Button { workingLogVM.toggleOpen() } label: { SwiftUI.Label("Working Log", systemImage: workingLogVM.isOpen ? "sidebar.right" : "sidebar.right") }
-                        .buttonStyle(SecondaryButtonStyle(size: .small))
-                        .accessibilityIdentifier("toolbar.workingLogToggle")
+                    Button {
+                        NotificationCenter.default.post(name: Notification.Name("dm.toolbar.openFilter"), object: nil)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "line.3.horizontal.decrease.circle")
+                            let count = (viewModel.availableOnly ? 1 : 0) + (viewModel.unlabeledOnly ? 1 : 0) + viewModel.activeFilterLabelIds.count
+                            if count > 0 { CountBadge(count: count) }
+                        }
+                    }
+                    .buttonStyle(SecondaryButtonStyle(size: .small))
+                }
+                // Overflow
+                ToolbarItem(placement: .automatic) {
+                    Menu {
+                        Button("Sync now") { _Concurrency.Task { await viewModel.sync() } }
+                        Button("Settings") { NotificationCenter.default.post(name: Notification.Name("dm.toolbar.openSettings"), object: nil) }
+                        Divider()
+                        Button { workingLogVM.toggleOpen() } label: { SwiftUI.Label("Working Log", systemImage: workingLogVM.isOpen ? "sidebar.right" : "sidebar.right") }
+                            .accessibilityIdentifier("toolbar.workingLogToggle")
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .menuStyle(.borderlessButton)
                 }
             }
             .environmentObject(workingLogVM)
