@@ -75,7 +75,10 @@ struct TaskCard: View {
                             let start = cal.startOfDay(for: dueAt)
                             return cal.date(byAdding: .day, value: 1, to: start) ?? dueAt
                         }()
-                        DueChip(date: dueAt, showsTime: task.dueHasTime, isOverdue: !task.isCompleted && now >= deadline)
+                        let isOverdue = !task.isCompleted && now >= deadline
+                        let soonThreshold = cal.date(byAdding: .day, value: 1, to: now) ?? now
+                        let isSoon = !isOverdue && (dueAt <= soonThreshold)
+                        DueChip(date: dueAt, showsTime: task.dueHasTime, isOverdue: isOverdue, isSoon: isSoon)
                     }
                 } else {
                     HStack(alignment: .center, spacing: Spacing.small) {
@@ -105,7 +108,10 @@ struct TaskCard: View {
                                 let start = cal.startOfDay(for: dueAt)
                                 return cal.date(byAdding: .day, value: 1, to: start) ?? dueAt
                             }()
-                            DueChip(date: dueAt, showsTime: task.dueHasTime, isOverdue: !task.isCompleted && now >= deadline)
+                            let isOverdue = !task.isCompleted && now >= deadline
+                            let soonThreshold = cal.date(byAdding: .day, value: 1, to: now) ?? now
+                            let isSoon = !isOverdue && (dueAt <= soonThreshold)
+                            DueChip(date: dueAt, showsTime: task.dueHasTime, isOverdue: isOverdue, isSoon: isSoon)
                                 .layoutPriority(2)
                         }
                     }
@@ -183,7 +189,10 @@ private struct DueChip: View {
     let date: Date
     var showsTime: Bool = true
     var isOverdue: Bool = false
+    var isSoon: Bool = false
     var body: some View {
+        let bg: Color = isOverdue ? Color.red : (isSoon ? Colors.warning.opacity(0.25) : Colors.surface.opacity(0.06))
+        let fg: Color = isOverdue ? .white : Colors.onSurface
         HStack(spacing: 4) {
             Image(systemName: "clock")
             Text(showsTime ? DateFormatter.shortDateTime.string(from: date) : DateFormatter.shortDate.string(from: date))
@@ -193,8 +202,8 @@ private struct DueChip: View {
         .font(.caption2)
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
-        .foregroundColor(isOverdue ? .white : Colors.onSurface)
-        .background(isOverdue ? Color.red : Colors.surfaceVariant)
+        .foregroundColor(fg)
+        .background(bg)
         .clipShape(Capsule())
         .accessibilityLabel(isOverdue ? "Overdue, was due \(showsTime ? DateFormatter.shortDateTime.string(from: date) : DateFormatter.shortDate.string(from: date))" : "Due \(showsTime ? DateFormatter.shortDateTime.string(from: date) : DateFormatter.shortDate.string(from: date))")
     }
