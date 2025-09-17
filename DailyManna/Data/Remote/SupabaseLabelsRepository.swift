@@ -35,21 +35,29 @@ final class SupabaseLabelsRepository: RemoteLabelsRepository {
     }
     
     func fetchLabels(since lastSync: Date? = nil) async throws -> [Label] {
-        var query = client
-            .from("labels")
-            .select("*")
-        
-        if let lastSync = lastSync {
-            query = query.gte("updated_at", value: lastSync.ISO8601Format())
+        let pageSize = 500
+        var all: [Label] = []
+        var cursor = lastSync
+        var isFirstPage = true
+        while true {
+            var query = client
+                .from("labels")
+                .select("*")
+                .order("updated_at", ascending: true)
+                .limit(pageSize)
+            if let cursorDate = cursor {
+                let iso = cursorDate.ISO8601Format()
+                query = isFirstPage ? query.gte("updated_at", value: iso) : query.gt("updated_at", value: iso)
+            }
+            let page: [LabelDTO] = try await query.execute().value
+            if page.isEmpty { break }
+            all.append(contentsOf: page.map { $0.toDomain() })
+            if page.count < pageSize { break }
+            cursor = page.last?.updated_at
+            isFirstPage = false
         }
-        
-        let response: [LabelDTO] = try await query
-            .execute()
-            .value
-        
-        let labels = response.map { $0.toDomain() }
-        Logger.shared.info("Fetched \(labels.count) labels since \(lastSync?.description ?? "beginning")", category: .data)
-        return labels
+        Logger.shared.info("Fetched (paged) \(all.count) labels since \(lastSync?.description ?? "beginning")", category: .data)
+        return all
     }
 
     func fetchLabel(id: UUID) async throws -> Label? {
@@ -162,7 +170,7 @@ final class SupabaseLabelsRepository: RemoteLabelsRepository {
             Logger.shared.error("Realtime subscribe failed (labels)", category: .data, error: error)
         }
         labelsChangesTask?.cancel()
-        labelsChangesTask = _Concurrency.Task { @MainActor in
+        labelsChangesTask = _Concurrency.Task<Void, Never> { @MainActor in
             for await event in changes {
                 if let idString = event.record?["id"] as? String, let id = UUID(uuidString: idString) {
                     let action = event.type.rawValue

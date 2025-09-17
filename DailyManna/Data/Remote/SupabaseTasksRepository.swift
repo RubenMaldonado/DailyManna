@@ -54,46 +54,58 @@ final class SupabaseTasksRepository: RemoteTasksRepository {
     }
     
     func fetchTasks(since lastSync: Date? = nil) async throws -> [Task] {
-        var query = client
-            .from("tasks")
-            .select("*")
-        
-        if let lastSync = lastSync {
-            query = query.gte("updated_at", value: lastSync.ISO8601Format())
+        let pageSize = 500
+        var all: [Task] = []
+        var cursor = lastSync
+        var isFirstPage = true
+        while true {
+            var query = client
+                .from("tasks")
+                .select("*")
+                .order("updated_at", ascending: true)
+                .limit(pageSize)
+            if let cursorDate = cursor {
+                let iso = cursorDate.ISO8601Format()
+                query = isFirstPage ? query.gte("updated_at", value: iso) : query.gt("updated_at", value: iso)
+            }
+            let page: [TaskDTO] = try await query.execute().value
+            if page.isEmpty { break }
+            all.append(contentsOf: page.map { $0.toDomain() })
+            if page.count < pageSize { break }
+            cursor = page.last?.updated_at
+            isFirstPage = false
         }
-        
-        let response: [TaskDTO] = try await query
-            .execute()
-            .value
-        
-        let tasks = response.map { $0.toDomain() }
-        Logger.shared.info("Fetched \(tasks.count) tasks since \(lastSync?.description ?? "beginning")", category: .data)
-        return tasks
+        Logger.shared.info("Fetched (paged) \(all.count) tasks since \(lastSync?.description ?? "beginning")", category: .data)
+        return all
     }
     
     func fetchTasks(since lastSync: Date?, bucketKey: String?, dueBy: Date?) async throws -> [Task] {
-        var query = client
-            .from("tasks")
-            .select("*")
-
-        if let lastSync {
-            query = query.gte("updated_at", value: lastSync.ISO8601Format())
+        let pageSize = 500
+        var all: [Task] = []
+        var cursor = lastSync
+        var isFirstPage = true
+        while true {
+            var query = client
+                .from("tasks")
+                .select("*")
+                .order("updated_at", ascending: true)
+                .limit(pageSize)
+            if let cursorDate = cursor {
+                let iso = cursorDate.ISO8601Format()
+                query = isFirstPage ? query.gte("updated_at", value: iso) : query.gt("updated_at", value: iso)
+            }
+            if let bucketKey { query = query.eq("bucket_key", value: bucketKey) }
+            if let dueBy { query = query.lte("due_at", value: dueBy.ISO8601Format()) }
+            query = query.is("deleted_at", value: nil)
+            let page: [TaskDTO] = try await query.execute().value
+            if page.isEmpty { break }
+            all.append(contentsOf: page.map { $0.toDomain() })
+            if page.count < pageSize { break }
+            cursor = page.last?.updated_at
+            isFirstPage = false
         }
-        if let bucketKey {
-            query = query.eq("bucket_key", value: bucketKey)
-        }
-        if let dueBy {
-            query = query.lte("due_at", value: dueBy.ISO8601Format())
-        }
-        // exclude soft-deleted rows for trimmed pulls
-        query = query.is("deleted_at", value: nil)
-
-        let response: [TaskDTO] = try await query
-            .execute()
-            .value
-        let tasks = response.map { $0.toDomain() }
-        Logger.shared.info("Fetched ctx-trimmed \(tasks.count) tasks since=\(lastSync?.description ?? "nil") bucket=\(bucketKey ?? "nil") dueBy=\(dueBy?.description ?? "nil")", category: .data)
-        return tasks
+        Logger.shared.info("Fetched (paged ctx) \(all.count) tasks since=\(lastSync?.description ?? "nil") bucket=\(bucketKey ?? "nil") dueBy=\(dueBy?.description ?? "nil")", category: .data)
+        return all
     }
     
     func updateTask(_ task: Task) async throws -> Task {
@@ -177,7 +189,7 @@ final class SupabaseTasksRepository: RemoteTasksRepository {
         }
         // Consume the async stream and post targeted notifications including id + action
         tasksChangesTask?.cancel()
-        tasksChangesTask = _Concurrency.Task { @MainActor in
+        tasksChangesTask = _Concurrency.Task<Void, Never> { @MainActor in
             for await event in changes {
                 // Expect payloads to include primary key `id` and `updated_at`
                 if let idString = event.record?["id"] as? String, let id = UUID(uuidString: idString) {
