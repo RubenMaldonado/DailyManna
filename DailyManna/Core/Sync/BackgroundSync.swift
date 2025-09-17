@@ -38,7 +38,7 @@ enum BackgroundSync {
             cancelled = true
         }
 
-        Task { @MainActor in
+        _Concurrency.Task { @MainActor in
             defer { schedule() } // always reschedule for next time
             do {
                 let auth = try Dependencies.shared.resolve(type: AuthenticationService.self)

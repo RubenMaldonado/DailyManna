@@ -40,16 +40,15 @@ final class SupabaseLabelsRepository: RemoteLabelsRepository {
         var cursor = lastSync
         var isFirstPage = true
         while true {
-            var query = client
+            var qFilter = client
                 .from("labels")
                 .select("*")
-                .order("updated_at", ascending: true)
-                .limit(pageSize)
             if let cursorDate = cursor {
                 let iso = cursorDate.ISO8601Format()
-                query = isFirstPage ? query.gte("updated_at", value: iso) : query.gt("updated_at", value: iso)
+                qFilter = isFirstPage ? qFilter.gte("updated_at", value: iso) : qFilter.gt("updated_at", value: iso)
             }
-            let page: [LabelDTO] = try await query.execute().value
+            let qOrdered = qFilter.order("updated_at", ascending: true).limit(pageSize)
+            let page: [LabelDTO] = try await qOrdered.execute().value
             if page.isEmpty { break }
             all.append(contentsOf: page.map { $0.toDomain() })
             if page.count < pageSize { break }

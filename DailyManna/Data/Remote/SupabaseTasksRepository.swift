@@ -59,16 +59,15 @@ final class SupabaseTasksRepository: RemoteTasksRepository {
         var cursor = lastSync
         var isFirstPage = true
         while true {
-            var query = client
+            var qFilter = client
                 .from("tasks")
                 .select("*")
-                .order("updated_at", ascending: true)
-                .limit(pageSize)
             if let cursorDate = cursor {
                 let iso = cursorDate.ISO8601Format()
-                query = isFirstPage ? query.gte("updated_at", value: iso) : query.gt("updated_at", value: iso)
+                qFilter = isFirstPage ? qFilter.gte("updated_at", value: iso) : qFilter.gt("updated_at", value: iso)
             }
-            let page: [TaskDTO] = try await query.execute().value
+            let q = qFilter.order("updated_at", ascending: true).limit(pageSize)
+            let page: [TaskDTO] = try await q.execute().value
             if page.isEmpty { break }
             all.append(contentsOf: page.map { $0.toDomain() })
             if page.count < pageSize { break }
@@ -85,19 +84,18 @@ final class SupabaseTasksRepository: RemoteTasksRepository {
         var cursor = lastSync
         var isFirstPage = true
         while true {
-            var query = client
+            var qFilter = client
                 .from("tasks")
                 .select("*")
-                .order("updated_at", ascending: true)
-                .limit(pageSize)
             if let cursorDate = cursor {
                 let iso = cursorDate.ISO8601Format()
-                query = isFirstPage ? query.gte("updated_at", value: iso) : query.gt("updated_at", value: iso)
+                qFilter = isFirstPage ? qFilter.gte("updated_at", value: iso) : qFilter.gt("updated_at", value: iso)
             }
-            if let bucketKey { query = query.eq("bucket_key", value: bucketKey) }
-            if let dueBy { query = query.lte("due_at", value: dueBy.ISO8601Format()) }
-            query = query.is("deleted_at", value: nil)
-            let page: [TaskDTO] = try await query.execute().value
+            if let bucketKey { qFilter = qFilter.eq("bucket_key", value: bucketKey) }
+            if let dueBy { qFilter = qFilter.lte("due_at", value: dueBy.ISO8601Format()) }
+            qFilter = qFilter.is("deleted_at", value: (nil as String?))
+            let q = qFilter.order("updated_at", ascending: true).limit(pageSize)
+            let page: [TaskDTO] = try await q.execute().value
             if page.isEmpty { break }
             all.append(contentsOf: page.map { $0.toDomain() })
             if page.count < pageSize { break }
@@ -189,7 +187,7 @@ final class SupabaseTasksRepository: RemoteTasksRepository {
         }
         // Consume the async stream and post targeted notifications including id + action
         tasksChangesTask?.cancel()
-        tasksChangesTask = _Concurrency.Task<Void, Never> { @MainActor in
+        tasksChangesTask = Task { @MainActor in
             for await event in changes {
                 // Expect payloads to include primary key `id` and `updated_at`
                 if let idString = event.record?["id"] as? String, let id = UUID(uuidString: idString) {
