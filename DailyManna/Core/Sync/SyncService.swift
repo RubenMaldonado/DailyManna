@@ -442,6 +442,44 @@ final class SyncService: ObservableObject {
                 await self.sync(for: userId)
             }
         }
+
+        // Targeted upsert handler: when we receive a specific row id, fetch and apply only that row
+        _ = NotificationCenter.default.addObserver(forName: Notification.Name("dm.remote.tasks.changed.targeted"), object: nil, queue: .main) { [weak self] note in
+            _Concurrency.Task { @MainActor [weak self] in
+                guard let self else { return }
+                guard self.currentUserId == userId else { return }
+                guard let id = note.userInfo?["id"] as? UUID else {
+                    return
+                }
+                do {
+                    // Fetch the authoritative row from the server
+                    if let remoteTask = try await self.remoteTasksRepository.fetchTask(id: id) {
+                        if let existing = try await self.localTasksRepository.fetchTask(by: id) {
+                            if remoteTask.updatedAt > existing.updatedAt {
+                                var updated = remoteTask
+                                updated.needsSync = false
+                                try await self.localTasksRepository.updateTask(updated)
+                            }
+                        } else {
+                            var newTask = remoteTask
+                            newTask.needsSync = false
+                            try await self.localTasksRepository.createTask(newTask)
+                        }
+                    } else {
+                        // If remote row is gone (hard-deleted or tombstoned), mirror locally
+                        if let existing = try await self.localTasksRepository.fetchTask(by: id) {
+                            var updated = existing
+                            updated.deletedAt = updated.deletedAt ?? Date()
+                            updated.needsSync = false
+                            try await self.localTasksRepository.updateTask(updated)
+                        }
+                    }
+                } catch {
+                    // On any failure, fallback to the coarse debounced delta pull
+                    NotificationCenter.default.post(name: Notification.Name("dm.remote.tasks.changed"), object: nil)
+                }
+            }
+        }
     }
 
     /// Resets saved sync checkpoints for a user

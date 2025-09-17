@@ -34,6 +34,25 @@ final class SupabaseTasksRepository: RemoteTasksRepository {
         return response.toDomain()
     }
     
+    func fetchTask(id: UUID) async throws -> Task? {
+        do {
+            let dto: TaskDTO = try await client
+                .from("tasks")
+                .select("*")
+                .eq("id", value: id.uuidString)
+                .single()
+                .execute()
+                .value
+            return dto.toDomain()
+        } catch {
+            // If not found, return nil; otherwise, propagate
+            if let supaError = error as? PostgrestError, supaError.code == "PGRST116" { // No rows
+                return nil
+            }
+            throw error
+        }
+    }
+    
     func fetchTasks(since lastSync: Date? = nil) async throws -> [Task] {
         var query = client
             .from("tasks")
@@ -143,7 +162,7 @@ final class SupabaseTasksRepository: RemoteTasksRepository {
         return syncedTasks
     }
     
-    // MARK: - Realtime (hint-only)
+    // MARK: - Realtime (targeted upserts)
     func startRealtime(userId: UUID) async throws {
         Logger.shared.info("Realtime start requested for tasks (user: \(userId))", category: .data)
         // Subscribe to table changes for hinting sync using RealtimeChannelV2 async stream API
@@ -156,11 +175,22 @@ final class SupabaseTasksRepository: RemoteTasksRepository {
         } catch {
             Logger.shared.error("Realtime subscribe failed", category: .data, error: error)
         }
-        // Consume the async stream and post a single debounced notification for any change
+        // Consume the async stream and post targeted notifications including id + action
         tasksChangesTask?.cancel()
         tasksChangesTask = _Concurrency.Task { @MainActor in
-            for await _ in changes {
-                NotificationCenter.default.post(name: Notification.Name("dm.remote.tasks.changed"), object: nil)
+            for await event in changes {
+                // Expect payloads to include primary key `id` and `updated_at`
+                if let idString = event.record?["id"] as? String, let id = UUID(uuidString: idString) {
+                    let action = event.type.rawValue
+                    let userInfo: [AnyHashable: Any] = [
+                        "id": id,
+                        "action": action
+                    ]
+                    NotificationCenter.default.post(name: Notification.Name("dm.remote.tasks.changed.targeted"), object: nil, userInfo: userInfo)
+                } else {
+                    // Fallback to coarse hint if payload missing
+                    NotificationCenter.default.post(name: Notification.Name("dm.remote.tasks.changed"), object: nil)
+                }
             }
         }
     }
