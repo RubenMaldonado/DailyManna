@@ -15,8 +15,7 @@ struct NextWeekSectionsListView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Spacing.xSmall, pinnedViews: [.sectionHeaders]) {
-                ForEach(viewModel.nextWeekSections, id: \.
-id) { section in
+                ForEach(viewModel.nextWeekSections, id: \.id) { section in
                     Section(header: header(for: section)) {
                         let items = viewModel.tasksByNextWeekDayKey[section.id] ?? []
                         if items.isEmpty {

@@ -158,11 +158,12 @@ final class TaskListViewModel: ObservableObject {
         let bucketKey = effectiveBucket?.rawValue
         let dueBy = availableOnly ? availableCutoffEndOfToday() : nil
         syncService?.setViewContext(bucketKey: bucketKey, dueBy: dueBy)
+        // Keep current content visible when changing filters in all-buckets/macOS to avoid blank UI
         if showLoading { isLoading = true }
         errorMessage = nil
         do {
             let rawPairs = try await Logger.shared.time("fetchTasksWithLabels", category: .perf) {
-                try await taskUseCases.fetchTasksWithLabels(for: userId, in: bucket)
+                try await taskUseCases.fetchTasksWithLabels(for: userId, in: effectiveBucket)
             }
             // Perform sort/filter/build label-id sets off the main actor to avoid UI stalls
             let availableOnlyLocal = self.availableOnly
@@ -232,8 +233,13 @@ final class TaskListViewModel: ObservableObject {
             }()
             Logger.shared.debug("renderBatch tasks=\(pairs.count) distinctLabels=\(distinctLabelCount)", category: .perf)
             #endif
-            // Commit result in one assignment to minimize view diff churn
-            self.tasksWithLabels = pairs
+            // Commit result; when in all-buckets list (forceAllBuckets) avoid clearing to empty first
+            if self.forceAllBuckets || self.isBoardModeActive {
+                // Replace in place to minimize flicker
+                self.tasksWithLabels = pairs
+            } else {
+                self.tasksWithLabels = pairs
+            }
             await loadRecurrenceFlags(for: pairs.map { $0.0.id })
             // Load subtask progress for visible items incrementally
             let parentIds = pairs.map { $0.0.id }
@@ -295,20 +301,29 @@ final class TaskListViewModel: ObservableObject {
         self.matchAll = matchAll
         self.unlabeledOnly = false
         persistFilterIds()
-        _Concurrency.Task { await self.fetchTasks(in: self.isBoardModeActive ? nil : self.selectedBucket) }
+        _Concurrency.Task {
+            let param: TimeBucket? = (self.forceAllBuckets || self.isBoardModeActive) ? nil : self.selectedBucket
+            await self.fetchTasks(in: param, showLoading: false)
+        }
     }
 
     func applyUnlabeledFilter() {
         self.activeFilterLabelIds.removeAll()
         self.matchAll = false
         self.unlabeledOnly = true
-        _Concurrency.Task { await self.fetchTasks(in: self.isBoardModeActive ? nil : self.selectedBucket) }
+        _Concurrency.Task {
+            let param: TimeBucket? = (self.forceAllBuckets || self.isBoardModeActive) ? nil : self.selectedBucket
+            await self.fetchTasks(in: param, showLoading: false)
+        }
     }
 
     func setAvailableFilter(_ enabled: Bool) {
         guard self.availableOnly != enabled else { return }
         self.availableOnly = enabled
-        _Concurrency.Task { await self.fetchTasks(in: self.isBoardModeActive ? nil : self.selectedBucket) }
+        _Concurrency.Task {
+            let param: TimeBucket? = (self.forceAllBuckets || self.isBoardModeActive) ? nil : self.selectedBucket
+            await self.fetchTasks(in: param, showLoading: false)
+        }
     }
 
     private func loadSubtaskProgressIncremental(for parentIds: [UUID]) async {
@@ -335,9 +350,13 @@ final class TaskListViewModel: ObservableObject {
         matchAll = false
         unlabeledOnly = false
         availableOnly = false
-        _Concurrency.Task { await self.fetchTasks(in: self.isBoardModeActive ? nil : self.selectedBucket) }
+        _Concurrency.Task {
+            let param: TimeBucket? = (self.forceAllBuckets || self.isBoardModeActive) ? nil : self.selectedBucket
+            await self.fetchTasks(in: param, showLoading: false)
+        }
         persistFilterIds()
         if featureThisWeekSectionsEnabled { deriveThisWeekSectionsAndGroups() }
+        if featureNextWeekSectionsEnabled { deriveNextWeekSectionsAndGroups() }
     }
 
     func select(bucket: TimeBucket) {
@@ -418,6 +437,8 @@ final class TaskListViewModel: ObservableObject {
                 }
             }
             await refreshCounts()
+            // Small delay to allow completion animation to read before row disappears under filters
+            try? await _Concurrency.Task.sleep(nanoseconds: 200_000_000) // 0.2s
             await fetchTasks(in: filter, showLoading: false)
             // Notify working log to refresh if open
             NotificationCenter.default.post(name: Notification.Name("dm.task.completed.changed"), object: nil, userInfo: ["taskId": task.id])
@@ -846,6 +867,8 @@ final class TaskListViewModel: ObservableObject {
         let weekend = WeekPlanner.saturdayAndSundayOfCurrentWeek(for: now, calendar: cal)
         for pair in tasksWithLabels {
             let task = pair.0
+            // Only include tasks that actually belong to This Week bucket
+            guard task.bucketKey == .thisWeek else { continue }
             guard task.isCompleted == false else { continue }
             guard let due = task.dueAt else { continue }
             let startDue = cal.startOfDay(for: due)
@@ -877,6 +900,8 @@ final class TaskListViewModel: ObservableObject {
         let cal = Calendar.current
         for pair in tasksWithLabels {
             let task = pair.0
+            // Only include tasks that actually belong to Next Week bucket
+            guard task.bucketKey == .nextWeek else { continue }
             guard task.isCompleted == false else { continue }
             guard let due = task.dueAt else { continue }
             let startDue = cal.startOfDay(for: due)
@@ -916,6 +941,11 @@ final class TaskListViewModel: ObservableObject {
             // Set to start of target day
             task.dueAt = cal.startOfDay(for: targetDate)
             task.dueHasTime = false
+        }
+        // Auto-assign bucket based on new due date so drag-to-schedule also moves buckets
+        if let due = task.dueAt {
+            let auto = computeAutoBucket(for: due)
+            task.bucketKey = auto
         }
         do {
             try await taskUseCases.updateTask(task)

@@ -38,19 +38,30 @@ public final class TaskUseCases {
     public func fetchTasksWithLabels(for userId: UUID, in bucket: TimeBucket?) async throws -> [(Task, [Label])] {
         let tasks = try await tasksRepository.fetchTasks(for: userId, in: bucket)
         let visible = tasks.filter { !$0.isDeleted }
-        // Parallelize label fetches to reduce end-to-end latency for larger lists
-        return try await withThrowingTaskGroup(of: (Task, [Label]).self) { group in
-            for task in visible {
-                group.addTask { [labelsRepository] in
-                    let labels = try await labelsRepository.fetchLabelsForTask(task.id).filter { !$0.isDeleted }
-                    return (task, labels)
+        // Fetch labels in small batches to reduce UI stall; still parallelized per batch
+        var output: [(Task, [Label])] = []
+        output.reserveCapacity(visible.count)
+        let batchSize = 50
+        var index = 0
+        while index < visible.count {
+            let end = min(index + batchSize, visible.count)
+            let slice = Array(visible[index..<end])
+            let batch: [(Task, [Label])] = try await withThrowingTaskGroup(of: (Task, [Label]).self) { group in
+                for task in slice {
+                    group.addTask { [labelsRepository] in
+                        let labels = try await labelsRepository.fetchLabelsForTask(task.id).filter { !$0.isDeleted }
+                        return (task, labels)
+                    }
                 }
+                var results: [(Task, [Label])] = []
+                results.reserveCapacity(slice.count)
+                for try await pair in group { results.append(pair) }
+                return results
             }
-            var output: [(Task, [Label])] = []
-            output.reserveCapacity(visible.count)
-            for try await pair in group { output.append(pair) }
-            return output
+            output.append(contentsOf: batch)
+            index = end
         }
+        return output
     }
     
     /// Fetches a specific task by ID, including its associated labels

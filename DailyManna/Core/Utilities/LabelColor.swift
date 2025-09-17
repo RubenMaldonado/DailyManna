@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import SwiftUI
 
 enum LabelColorHash {
     static func colorHex(for name: String) -> String {
@@ -19,6 +20,7 @@ enum LabelColorHash {
         return palette[idx]
     }
 }
+
 
 
 

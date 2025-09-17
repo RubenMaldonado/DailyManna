@@ -35,23 +35,9 @@ struct TaskCard: View {
     
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.small) {
-            Button {
-                #if os(iOS)
-                Haptics.lightTap()
-                #endif
+            CompletionCheck(isCompleted: task.isCompleted) {
                 onToggleCompletion?()
-            } label: {
-                ZStack {
-                    Circle().fill(Color.clear)
-                        .frame(width: 32, height: 32)
-                    Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
-                        .font(.title2)
-                        .foregroundColor(task.isCompleted ? Colors.primary : Colors.onSurface.opacity(0.6))
-                }
             }
-            .buttonStyle(.plain) // To remove default button styling
-            .accessibilityLabel(task.isCompleted ? "Mark incomplete" : "Mark complete")
-            .accessibilityHint("Toggles completion for \(task.title)")
             
             VStack(alignment: .leading, spacing: Spacing.xxSmall) {
                 // Title row (wrap fully, no ellipsis)
@@ -149,6 +135,10 @@ struct TaskCard: View {
                 Button("Generate now") { onGenerateNow?() }
             }
         }
+        .transition(.asymmetric(
+            insertion: .scale.combined(with: .opacity),
+            removal: .move(edge: .trailing).combined(with: .opacity)
+        ))
     }
 }
 

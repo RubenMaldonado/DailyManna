@@ -11,18 +11,9 @@ struct TasksListRowView: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: Spacing.small) {
-            Button {
-                #if os(iOS)
-                Haptics.lightTap()
-                #endif
+            CompletionCheck(isCompleted: task.isCompleted) {
                 onToggle(task)
-            } label: {
-                Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
-                    .font(.title3)
-                    .foregroundColor(task.isCompleted ? Colors.primary : Colors.onSurface.opacity(0.6))
-                    .frame(width: 28, height: 28)
             }
-            .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xSmall) {

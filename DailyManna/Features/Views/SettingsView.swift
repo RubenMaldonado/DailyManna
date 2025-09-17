@@ -196,6 +196,8 @@ struct SettingsView: View {
     @EnvironmentObject private var authService: AuthenticationService
     @AppStorage("appearance") private var appearance: String = "system"
     @AppStorage("dueNotificationsEnabled") private var dueNotificationsEnabled: Bool = false
+    @AppStorage("completionHapticEnabled") private var completionHapticEnabled: Bool = true
+    @AppStorage("completionSoundEnabled") private var completionSoundEnabled: Bool = false
     
     var body: some View {
         NavigationStack {
@@ -211,6 +213,12 @@ struct SettingsView: View {
                 Section("Features") {
                     Toggle("Enable Subtasks & Rich Descriptions", isOn: $viewModel.featureSubtasksEnabled)
                     NavigationLink("Keyboard Shortcuts") { KeyboardShortcutsView() }
+                }
+                Section("Feedback") {
+                    Toggle("Completion haptic", isOn: $completionHapticEnabled)
+                    Toggle("Completion sound", isOn: $completionSoundEnabled)
+                        .tint(Colors.warning)
+                        .accessibilityHint("Plays a subtle tone when marking a task complete")
                 }
                 #if DEBUG
                 Section("Testing") {

@@ -461,6 +461,37 @@ struct InlineNextWeekColumn: View {
         }
     }
 
+    @ViewBuilder
+    private func taskRow(pair: (Task, [Label]), section: WeekdaySection) -> some View {
+        TaskCard(
+            task: pair.0,
+            labels: pair.1,
+            onToggleCompletion: { onToggle(pair.0) },
+            subtaskProgress: subtaskProgressByParent[pair.0.id],
+            showsRecursIcon: tasksWithRecurrence.contains(pair.0.id),
+            onPauseResume: { onPauseResume(pair.0.id) },
+            onSkipNext: { onSkipNext(pair.0.id) },
+            onGenerateNow: { onGenerateNow(pair.0.id) }
+        )
+        .contextMenu {
+            Menu("Schedule") {
+                ForEach(sections, id: \.id) { sec in
+                    Button(sec.title) { schedule(pair.0.id, sec.date) }
+                }
+            }
+            Menu("Move to Bucket") {
+                ForEach(TimeBucket.allCases.sorted { $0.sortOrder < $1.sortOrder }) { dest in
+                    Button(dest.displayName) { onMoveBucket(pair.0.id, dest) }
+                }
+            }
+            Button("Edit") { onEdit(pair.0) }
+            Button(role: .destructive) { onDelete(pair.0) } label: { Text("Delete") }
+        }
+        .onTapGesture(count: 2) { onEdit(pair.0) }
+        .draggable(DraggableTaskID(id: pair.0.id))
+        .padding(.horizontal, Spacing.xSmall)
+    }
+
     private var unplannedItems: [(Task, [Label])] {
         tasksWithLabels.filter { pair in
             let t = pair.0
