@@ -9,6 +9,8 @@ import Foundation
 
 protocol RemoteLabelsRepository {
     func createLabel(_ label: Label) async throws -> Label
+    /// Fetch a single label by id from the remote store
+    func fetchLabel(id: UUID) async throws -> Label?
     func fetchLabels(since lastSync: Date?) async throws -> [Label]
     func updateLabel(_ label: Label) async throws -> Label
     func deleteLabel(id: UUID) async throws

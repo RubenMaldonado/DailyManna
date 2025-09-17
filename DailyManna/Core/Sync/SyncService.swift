@@ -480,6 +480,41 @@ final class SyncService: ObservableObject {
                 }
             }
         }
+
+        // Labels targeted upsert handler
+        _ = NotificationCenter.default.addObserver(forName: Notification.Name("dm.remote.labels.changed.targeted"), object: nil, queue: .main) { [weak self] note in
+            _Concurrency.Task { @MainActor [weak self] in
+                guard let self else { return }
+                guard self.currentUserId == userId else { return }
+                guard let id = note.userInfo?["id"] as? UUID else {
+                    return
+                }
+                do {
+                    if let remoteLabel = try await self.remoteLabelsRepository.fetchLabel(id: id) {
+                        if let existing = try await self.localLabelsRepository.fetchLabel(by: id) {
+                            if remoteLabel.updatedAt > existing.updatedAt {
+                                var updated = remoteLabel
+                                updated.needsSync = false
+                                try await self.localLabelsRepository.updateLabel(updated)
+                            }
+                        } else {
+                            var newLabel = remoteLabel
+                            newLabel.needsSync = false
+                            try await self.localLabelsRepository.createLabel(newLabel)
+                        }
+                    } else {
+                        if let existing = try await self.localLabelsRepository.fetchLabel(by: id) {
+                            var updated = existing
+                            updated.deletedAt = updated.deletedAt ?? Date()
+                            updated.needsSync = false
+                            try await self.localLabelsRepository.updateLabel(updated)
+                        }
+                    }
+                } catch {
+                    NotificationCenter.default.post(name: Notification.Name("dm.remote.labels.changed"), object: nil)
+                }
+            }
+        }
     }
 
     /// Resets saved sync checkpoints for a user
