@@ -22,6 +22,9 @@ struct DailyMannaApp: App {
         // Now safe to use self
         configureDependencies()
         configureDesignSystem()
+        #if os(iOS)
+        BackgroundSync.register()
+        #endif
         
         do {
             let service = try Dependencies.shared.resolve(type: AuthenticationService.self)
@@ -49,6 +52,9 @@ struct DailyMannaApp: App {
                 await authService.runAuthLifecycle()
                  #if canImport(UIKit)
                 NotificationRouter.shared.register()
+                #endif
+                #if os(iOS)
+                BackgroundSync.schedule()
                 #endif
             }
         }
