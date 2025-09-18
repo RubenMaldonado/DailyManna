@@ -93,7 +93,7 @@ final class SupabaseTasksRepository: RemoteTasksRepository {
             }
             if let bucketKey { qFilter = qFilter.eq("bucket_key", value: bucketKey) }
             if let dueBy { qFilter = qFilter.lte("due_at", value: dueBy.ISO8601Format()) }
-            qFilter = qFilter.is("deleted_at", value: (nil as String?))
+            qFilter = qFilter.is("deleted_at", value: nil)
             let q = qFilter.order("updated_at", ascending: true).limit(pageSize)
             let page: [TaskDTO] = try await q.execute().value
             if page.isEmpty { break }
@@ -187,22 +187,21 @@ final class SupabaseTasksRepository: RemoteTasksRepository {
         }
         // Consume the async stream and post targeted notifications including id + action
         tasksChangesTask?.cancel()
-        tasksChangesTask = Task { @MainActor in
+        tasksChangesTask = _Concurrency.Task.detached(priority: nil, operation: { () async -> Void in
             for await event in changes {
-                // Expect payloads to include primary key `id` and `updated_at`
                 if let idString = event.record?["id"] as? String, let id = UUID(uuidString: idString) {
                     let action = event.type.rawValue
-                    let userInfo: [AnyHashable: Any] = [
-                        "id": id,
-                        "action": action
-                    ]
-                    NotificationCenter.default.post(name: Notification.Name("dm.remote.tasks.changed.targeted"), object: nil, userInfo: userInfo)
+                    let userInfo: [AnyHashable: Any] = ["id": id, "action": action]
+                    await MainActor.run {
+                        NotificationCenter.default.post(name: Notification.Name("dm.remote.tasks.changed.targeted"), object: nil, userInfo: userInfo)
+                    }
                 } else {
-                    // Fallback to coarse hint if payload missing
-                    NotificationCenter.default.post(name: Notification.Name("dm.remote.tasks.changed"), object: nil)
+                    await MainActor.run {
+                        NotificationCenter.default.post(name: Notification.Name("dm.remote.tasks.changed"), object: nil)
+                    }
                 }
             }
-        }
+        })
     }
     
     func stopRealtime() async {

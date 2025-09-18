@@ -169,16 +169,20 @@ final class SupabaseLabelsRepository: RemoteLabelsRepository {
             Logger.shared.error("Realtime subscribe failed (labels)", category: .data, error: error)
         }
         labelsChangesTask?.cancel()
-        labelsChangesTask = _Concurrency.Task<Void, Never> { @MainActor in
+        labelsChangesTask = _Concurrency.Task.detached(priority: nil, operation: { () async -> Void in
             for await event in changes {
                 if let idString = event.record?["id"] as? String, let id = UUID(uuidString: idString) {
                     let action = event.type.rawValue
-                    NotificationCenter.default.post(name: Notification.Name("dm.remote.labels.changed.targeted"), object: nil, userInfo: ["id": id, "action": action])
+                    await MainActor.run {
+                        NotificationCenter.default.post(name: Notification.Name("dm.remote.labels.changed.targeted"), object: nil, userInfo: ["id": id, "action": action])
+                    }
                 } else {
-                    NotificationCenter.default.post(name: Notification.Name("dm.remote.labels.changed"), object: nil)
+                    await MainActor.run {
+                        NotificationCenter.default.post(name: Notification.Name("dm.remote.labels.changed"), object: nil)
+                    }
                 }
             }
-        }
+        })
     }
     
     func stopRealtime() async {

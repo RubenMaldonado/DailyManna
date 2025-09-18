@@ -46,7 +46,7 @@ final class WorkingLogPanelViewModel: ObservableObject {
         self.labelsRepository = labelsRepository
         NotificationCenter.default.addObserver(forName: Notification.Name("dm.task.completed.changed"), object: nil, queue: .main) { [weak self] _ in
             guard let self else { return }
-            Task { @MainActor [weak self] in
+            _Concurrency.Task { @MainActor [weak self] in
                 guard let self else { return }
                 if self.isOpen {
                     await self.reload()
