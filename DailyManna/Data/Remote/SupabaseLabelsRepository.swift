@@ -10,8 +10,7 @@ import Supabase
 
 final class SupabaseLabelsRepository: RemoteLabelsRepository {
     private let client: SupabaseClient
-    private var labelsChannel: RealtimeChannelV2?
-    private var labelsChangesTask: _Concurrency.Task<Void, Never>?
+    // Realtime moved to RealtimeCoordinator
     
     init(client: SupabaseClient = SupabaseConfig.shared.client) {
         self.client = client
@@ -157,41 +156,7 @@ final class SupabaseLabelsRepository: RemoteLabelsRepository {
         return response.map { $0.toDomain() }
     }
     
-    // MARK: - Realtime (targeted upserts)
-    func startRealtime(userId: UUID) async throws {
-        Logger.shared.info("Realtime start requested for labels (user: \(userId))", category: .data)
-        let channel = client.channel("dm_labels_\(userId.uuidString)")
-        self.labelsChannel = channel
-        let changes = channel.postgresChange(AnyAction.self, schema: "public", table: "labels", filter: .eq("user_id", value: userId.uuidString))
-        do {
-            try await channel.subscribeWithError()
-        } catch {
-            Logger.shared.error("Realtime subscribe failed (labels)", category: .data, error: error)
-        }
-        labelsChangesTask?.cancel()
-        labelsChangesTask = _Concurrency.Task.detached(priority: nil, operation: { () async -> Void in
-            for await event in changes {
-                if let idString = event.record?["id"] as? String, let id = UUID(uuidString: idString) {
-                    let action = event.type.rawValue
-                    await MainActor.run {
-                        NotificationCenter.default.post(name: Notification.Name("dm.remote.labels.changed.targeted"), object: nil, userInfo: ["id": id, "action": action])
-                    }
-                } else {
-                    await MainActor.run {
-                        NotificationCenter.default.post(name: Notification.Name("dm.remote.labels.changed"), object: nil)
-                    }
-                }
-            }
-        })
-    }
-    
-    func stopRealtime() async {
-        Logger.shared.info("Realtime stop requested for labels", category: .data)
-        labelsChangesTask?.cancel()
-        labelsChangesTask = nil
-        _ = labelsChannel
-        labelsChannel = nil
-    }
+    // Realtime removed from repository; handled by RealtimeCoordinator
     
     func deleteAll(for userId: UUID) async throws {
         try await client
@@ -202,3 +167,5 @@ final class SupabaseLabelsRepository: RemoteLabelsRepository {
         Logger.shared.info("Bulk deleted labels remotely for user: \(userId)", category: .data)
     }
 }
+
+// No realtime helpers here

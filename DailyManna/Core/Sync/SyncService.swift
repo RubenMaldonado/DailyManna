@@ -21,6 +21,7 @@ final class SyncService: ObservableObject {
     private let syncStateStore: SyncStateStore
     private let localWorkingLogRepository: WorkingLogRepository
     private let remoteWorkingLogRepository: RemoteWorkingLogRepository
+    private let realtimeCoordinator: RealtimeCoordinator = RealtimeCoordinator()
     private var realtimeObserver: NSObjectProtocol?
     private var realtimeDebounceScheduled = false
     private var currentUserId: UUID?
@@ -395,9 +396,20 @@ final class SyncService: ObservableObject {
     func performInitialSync(for userId: UUID) async {
         Logger.shared.info("Performing initial sync", category: .sync)
         self.currentUserId = userId
-        // Start realtime (no-op stubs in Epic 1.3)
-        try? await remoteTasksRepository.startRealtime(userId: userId)
-        try? await remoteLabelsRepository.startRealtime(userId: userId)
+        await realtimeCoordinator.start(for: userId)
+        // Consume typed realtime streams -> targeted upserts
+        _Concurrency.Task { [weak self] in
+            guard let self else { return }
+            for await change in await self.realtimeCoordinator.taskChanges {
+                await self.applyTargetedTaskChange(change: change, userId: userId)
+            }
+        }
+        _Concurrency.Task { [weak self] in
+            guard let self else { return }
+            for await change in await self.realtimeCoordinator.labelChanges {
+                await self.applyTargetedLabelChange(change: change, userId: userId)
+            }
+        }
         startRealtimeHints(for: userId)
         await sync(for: userId)
     }
@@ -542,6 +554,63 @@ final class SyncService: ObservableObject {
             }
         }
         throw lastError ?? NSError(domain: "Sync", code: -1)
+    }
+}
+
+// MARK: - Realtime targeted change appliers
+private extension SyncService {
+    func applyTargetedTaskChange(change: TaskChange, userId: UUID) async {
+        guard currentUserId == userId else { return }
+        guard let id = change.id else {
+            NotificationCenter.default.post(name: Notification.Name("dm.remote.tasks.changed"), object: nil)
+            return
+        }
+        do {
+            if change.action == .delete {
+                try await localTasksRepository.deleteTask(by: id)
+            } else if let remote = try await remoteTasksRepository.fetchTask(id: id) {
+                if let existing = try await localTasksRepository.fetchTask(by: id) {
+                    if remote.updatedAt > existing.updatedAt {
+                        var updated = remote
+                        updated.needsSync = false
+                        try await localTasksRepository.updateTask(updated)
+                    }
+                } else {
+                    var created = remote
+                    created.needsSync = false
+                    try await localTasksRepository.createTask(created)
+                }
+            }
+        } catch {
+            NotificationCenter.default.post(name: Notification.Name("dm.remote.tasks.changed"), object: nil)
+        }
+    }
+
+    func applyTargetedLabelChange(change: LabelChange, userId: UUID) async {
+        guard currentUserId == userId else { return }
+        guard let id = change.id else {
+            NotificationCenter.default.post(name: Notification.Name("dm.remote.labels.changed"), object: nil)
+            return
+        }
+        do {
+            if change.action == .delete {
+                try await localLabelsRepository.deleteLabel(by: id)
+            } else if let remote = try await remoteLabelsRepository.fetchLabel(id: id) {
+                if let existing = try await localLabelsRepository.fetchLabel(by: id) {
+                    if remote.updatedAt > existing.updatedAt {
+                        var updated = remote
+                        updated.needsSync = false
+                        try await localLabelsRepository.updateLabel(updated)
+                    }
+                } else {
+                    var created = remote
+                    created.needsSync = false
+                    try await localLabelsRepository.createLabel(created)
+                }
+            }
+        } catch {
+            NotificationCenter.default.post(name: Notification.Name("dm.remote.labels.changed"), object: nil)
+        }
     }
 }
 

@@ -25,6 +25,14 @@ struct TaskDTO: Codable {
     let deleted_at: Date?
     
     static func from(domain task: Task) -> TaskDTO {
+        // Guard: ROUTINES cannot have due_at unless it is a child (has parent_task_id)
+        let normalizedDueAt: Date? = {
+            if task.bucketKey == .routines && task.parentTaskId == nil {
+                Logger.shared.info("Normalizing ROUTINES root task: clearing due_at to satisfy constraint", category: .data)
+                return nil
+            }
+            return task.dueAt
+        }()
         return TaskDTO(
             id: task.id,
             user_id: task.userId,
@@ -33,7 +41,7 @@ struct TaskDTO: Codable {
             parent_task_id: task.parentTaskId,
             title: task.title,
             description: task.description,
-            due_at: task.dueAt,
+            due_at: normalizedDueAt,
             due_has_time: task.dueHasTime,
             recurrence_rule: task.recurrenceRule,
             is_completed: task.isCompleted,

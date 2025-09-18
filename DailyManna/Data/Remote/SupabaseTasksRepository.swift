@@ -10,8 +10,7 @@ import Supabase
 
 final class SupabaseTasksRepository: RemoteTasksRepository {
     private let client: SupabaseClient
-    private var tasksChannel: RealtimeChannelV2?
-    private var tasksChangesTask: _Concurrency.Task<Void, Never>?
+    // Realtime moved to RealtimeCoordinator
     
     init(client: SupabaseClient = SupabaseConfig.shared.client) {
         self.client = client
@@ -172,46 +171,7 @@ final class SupabaseTasksRepository: RemoteTasksRepository {
         return syncedTasks
     }
     
-    // MARK: - Realtime (targeted upserts)
-    func startRealtime(userId: UUID) async throws {
-        Logger.shared.info("Realtime start requested for tasks (user: \(userId))", category: .data)
-        // Subscribe to table changes for hinting sync using RealtimeChannelV2 async stream API
-        let channel = client.channel("dm_tasks_\(userId.uuidString)")
-        self.tasksChannel = channel
-        // postgresChange returns an async stream immediately; no need to await its creation
-        let changes = channel.postgresChange(AnyAction.self, schema: "public", table: "tasks", filter: .eq("user_id", value: userId.uuidString))
-        do {
-            try await channel.subscribeWithError()
-        } catch {
-            Logger.shared.error("Realtime subscribe failed", category: .data, error: error)
-        }
-        // Consume the async stream and post targeted notifications including id + action
-        tasksChangesTask?.cancel()
-        tasksChangesTask = _Concurrency.Task.detached(priority: nil, operation: { () async -> Void in
-            for await event in changes {
-                if let idString = event.record?["id"] as? String, let id = UUID(uuidString: idString) {
-                    let action = event.type.rawValue
-                    let userInfo: [AnyHashable: Any] = ["id": id, "action": action]
-                    await MainActor.run {
-                        NotificationCenter.default.post(name: Notification.Name("dm.remote.tasks.changed.targeted"), object: nil, userInfo: userInfo)
-                    }
-                } else {
-                    await MainActor.run {
-                        NotificationCenter.default.post(name: Notification.Name("dm.remote.tasks.changed"), object: nil)
-                    }
-                }
-            }
-        })
-    }
-    
-    func stopRealtime() async {
-        Logger.shared.info("Realtime stop requested for tasks", category: .data)
-        tasksChangesTask?.cancel()
-        tasksChangesTask = nil
-        // Best-effort unsubscribe if available
-        _ = tasksChannel
-        tasksChannel = nil
-    }
+    // Realtime removed from repository; handled by RealtimeCoordinator
     
     func deleteAll(for userId: UUID) async throws {
         // Soft-delete all tasks by setting deleted_at where user_id matches
@@ -223,3 +183,6 @@ final class SupabaseTasksRepository: RemoteTasksRepository {
         Logger.shared.info("Bulk deleted tasks remotely for user: \(userId)", category: .data)
     }
 }
+
+// MARK: - Realtime helpers
+// No private realtime helpers needed
