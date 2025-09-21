@@ -63,6 +63,7 @@ struct TaskListScreenIOS: View {
         .toolbar { toolbarContent() }
         .toolbarBackground(Materials.glassChrome, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
+        .overlay(alignment: .top) { GlassEffects.hairlineDivider() }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("dm.open.task"))) { note in
             if let id = note.userInfo?["taskId"] as? UUID {
                 _Concurrency.Task {
@@ -170,7 +171,7 @@ struct TaskListScreenIOS: View {
                             if count > 0 { CountBadge(count: count) }
                         }
                     }
-                    .buttonStyle(SecondaryButtonStyle(size: .small))
+                    .buttonStyle(GlassSecondaryButtonStyle(size: .small))
                     // Primary add button
                     Button(action: { viewModel.presentCreateForm() }) {
                         SwiftUI.Label("New Task", systemImage: "plus.circle.fill")
@@ -182,8 +183,6 @@ struct TaskListScreenIOS: View {
                         Menu("View") {
                             Button(action: { viewMode = .list }) { SwiftUI.Label("List", systemImage: "list.bullet"); if viewMode == .list { Image(systemName: "checkmark") } }
                             Button(action: { viewMode = .board }) { SwiftUI.Label("Board", systemImage: "rectangle.grid.2x2"); if viewMode == .board { Image(systemName: "checkmark") } }
-                            Divider()
-                            Button(viewModel.showCompleted ? "Hide Completed" : "Show Completed") { viewModel.showCompleted.toggle(); _Concurrency.Task { await viewModel.fetchTasks(in: nil) } }
                         }
                         Divider()
                         Button("Sync now") { _Concurrency.Task { await viewModel.sync() } }
