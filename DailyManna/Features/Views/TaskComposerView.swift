@@ -222,6 +222,7 @@ struct TaskComposerView: View {
             .padding()
             .presentationDetents([.medium])
         }
+        .presentationBackground(Materials.glassOverlay)
         #endif
         #if !os(macOS)
         .sheet(isPresented: $showRepeat) {
@@ -237,9 +238,11 @@ struct TaskComposerView: View {
             }
             .padding()
         }
+        .presentationBackground(Materials.glassOverlay)
         .sheet(isPresented: $showLabels) {
             LabelMultiSelectSheet(userId: authService.currentUser?.id ?? draft.userId, selected: $selectedLabelIds)
         }
+        .presentationBackground(Materials.glassOverlay)
         #endif
         .onAppear { loadAllLabels() }
     }

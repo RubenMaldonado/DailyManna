@@ -61,6 +61,8 @@ struct TaskListScreenIOS: View {
         .sheet(isPresented: $showFilterSheet) { filterSheet() }
         .sheet(isPresented: $showSettings) { settingsSheet() }
         .toolbar { toolbarContent() }
+        .toolbarBackground(Materials.glassChrome, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("dm.open.task"))) { note in
             if let id = note.userInfo?["taskId"] as? UUID {
                 _Concurrency.Task {

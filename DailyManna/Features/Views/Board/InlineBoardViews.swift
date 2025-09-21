@@ -215,6 +215,7 @@ struct InlineStandardBucketColumn: View {
             // Approximate userId from any pair if needed; callers pass set on commit
             LabelMultiSelectSheet(userId: tasksWithLabels.first?.0.userId ?? UUID(), selected: $selectedLabelIdsForSheet)
         }
+        .presentationBackground(Materials.glassOverlay)
         .onChange(of: showingLabelsSheet) { _, newValue in
             if newValue == false, let tid = editingLabelsTaskId {
                 onSetLabels(tid, selectedLabelIdsForSheet)

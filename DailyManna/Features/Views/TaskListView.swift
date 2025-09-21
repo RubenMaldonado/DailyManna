@@ -60,6 +60,8 @@ struct TaskListView: View {
     var body: some View {
         #if os(iOS)
         NavigationStack { TaskListScreenIOS(viewModel: viewModel, userId: userId) }
+        .toolbarBackground(Materials.glassChrome, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         #else
         NavigationStack {
         VStack(spacing: 0) {
