@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct SurfaceStyle: ViewModifier {
-    enum Kind { case background, content, chrome, overlay, solidFallback }
+    enum Kind { case background, content, chrome, overlay, solidFallback, glassChrome, glassOverlay, glassContent }
     var kind: Kind
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -19,6 +19,9 @@ struct SurfaceStyle: ViewModifier {
             content.background(Colors.background)
         case .content:
             // Opaque content surface for readable text
+            content.background(Colors.surface)
+        case .glassContent:
+            // Keep content opaque by default for legibility
             content.background(Colors.surface)
         case .chrome:
             // Translucent chrome candidate; fallback to solid variant when transparency is reduced
@@ -31,6 +34,12 @@ struct SurfaceStyle: ViewModifier {
                 content.background(Colors.surfaceVariant)
                 #endif
             }
+        case .glassChrome:
+            if reduceTransparency {
+                content.background(Colors.surfaceVariant)
+            } else {
+                content.background(Materials.glassChrome)
+            }
         case .overlay:
             // Dimmed overlay; adapt dim color to scheme
             let dim = colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.12)
@@ -42,6 +51,13 @@ struct SurfaceStyle: ViewModifier {
                 #else
                 content.background(Colors.surface).overlay(dim)
                 #endif
+            }
+        case .glassOverlay:
+            let dim = Materials.dim(for: colorScheme)
+            if reduceTransparency {
+                content.background(Colors.surface).overlay(dim)
+            } else {
+                content.background(Materials.glassOverlay).overlay(dim)
             }
         case .solidFallback:
             content.background(Colors.background)
