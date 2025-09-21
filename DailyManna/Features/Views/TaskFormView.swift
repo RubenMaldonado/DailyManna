@@ -276,6 +276,7 @@ struct TaskFormView: View {
                 .padding()
                 .presentationDetents([.medium])
             }
+            .presentationBackground(Materials.glassOverlay)
             .sheet(isPresented: $showRepeat) {
                 VStack(alignment: .leading, spacing: 12) {
                     RecurrencePicker(rule: $recurrenceRule)
@@ -289,9 +290,11 @@ struct TaskFormView: View {
                 }
                 .padding()
             }
+            .presentationBackground(Materials.glassOverlay)
             .sheet(isPresented: $showLabels) {
                 LabelMultiSelectSheet(userId: authService.currentUser?.id ?? draft.userId, selected: $selectedLabels)
             }
+            .presentationBackground(Materials.glassOverlay)
             #endif
             .onAppear {
                 loadAllLabels()

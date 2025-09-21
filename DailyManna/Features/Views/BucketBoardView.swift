@@ -101,6 +101,7 @@ struct BucketBoardView: View {
                 Text("No task selected").padding()
             }
         }
+        .presentationBackground(Materials.glassOverlay)
         .task {
             await viewModel.refreshCounts()
             // Fetch all for the board so every column has data

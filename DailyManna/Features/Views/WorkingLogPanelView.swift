@@ -221,6 +221,7 @@ struct WorkingLogPanelView: View {
         .sheet(isPresented: $viewModel.isPresentingForm) {
             creationSheet
         }
+        .presentationBackground(Materials.glassOverlay)
         .task {
             if didInitialLoad == false {
                 await viewModel.reload()

@@ -127,6 +127,7 @@ struct LabelManagementView: View {
             .sheet(isPresented: $viewModel.isPresentingEditor) {
                 LabelEditorSheet(name: $viewModel.draftName, selectedHex: $viewModel.draftColor, onSave: { _Concurrency.Task { await viewModel.save() } }, onCancel: { viewModel.isPresentingEditor = false })
             }
+            .presentationBackground(Materials.glassOverlay)
         }
     }
     
