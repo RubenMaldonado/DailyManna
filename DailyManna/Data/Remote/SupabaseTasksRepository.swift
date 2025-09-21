@@ -19,15 +19,67 @@ final class SupabaseTasksRepository: RemoteTasksRepository {
     func createTask(_ task: Task) async throws -> Task {
         let dto = TaskDTO.from(domain: task)
         
-        let response: TaskDTO = try await client
-            .from("tasks")
-            // Use primary key upsert to avoid duplicate key errors when a task
-            // with the same id was previously created (e.g., after retries)
-            .upsert(dto, onConflict: "id")
-            .select()
-            .single()
-            .execute()
-            .value
+        // Detect ROUTINES root templates (partial unique index exists server-side)
+        let isRoutinesTemplate = dto.bucket_key == "ROUTINES" && dto.parent_task_id == nil
+        let response: TaskDTO
+        do {
+            if isRoutinesTemplate {
+                // Use plain insert; partial unique index cannot be targeted via onConflict columns in PostgREST
+                response = try await client
+                    .from("tasks")
+                    .insert(dto)
+                    .select()
+                    .single()
+                    .execute()
+                    .value
+            } else {
+                // Non-templates: safe to upsert on primary key id
+                response = try await client
+                    .from("tasks")
+                    .upsert(dto, onConflict: "id")
+                    .select()
+                    .single()
+                    .execute()
+                    .value
+            }
+        } catch {
+            // Reconciliation path: if unique constraint still triggers (e.g., race), fetch the existing row
+            if let pgError = error as? PostgrestError,
+               pgError.message.contains("duplicate key value violates unique constraint"),
+               isRoutinesTemplate {
+                // Attempt to fetch by user + ROUTINES + root + active + exact title match
+                if let existing: TaskDTO = try? await client
+                    .from("tasks")
+                    .select("*")
+                    .eq("user_id", value: dto.user_id.uuidString)
+                    .eq("bucket_key", value: "ROUTINES")
+                    .is("parent_task_id", value: nil)
+                    .is("deleted_at", value: nil)
+                    .eq("title", value: dto.title)
+                    .single()
+                    .execute()
+                    .value {
+                    Logger.shared.info("Reconciled duplicate ROUTINES template by fetching existing row for title=\(dto.title)", category: .data)
+                    return existing.toDomain()
+                }
+                // Fallback: try case-insensitive match
+                if let existing: TaskDTO = try? await client
+                    .from("tasks")
+                    .select("*")
+                    .eq("user_id", value: dto.user_id.uuidString)
+                    .eq("bucket_key", value: "ROUTINES")
+                    .is("parent_task_id", value: nil)
+                    .is("deleted_at", value: nil)
+                    .ilike("title", pattern: dto.title)
+                    .single()
+                    .execute()
+                    .value {
+                    Logger.shared.info("Reconciled duplicate ROUTINES template by ILIKE title match title=\(dto.title)", category: .data)
+                    return existing.toDomain()
+                }
+            }
+            throw error
+        }
         
         Logger.shared.info("Created task remotely: \(task.id)", category: .data)
         return response.toDomain()

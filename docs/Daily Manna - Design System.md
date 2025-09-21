@@ -46,6 +46,40 @@ Prepare for Liquid Glass by **abstracting surfaces** behind tokens and policies.
 
 * Translucency belongs to **chrome** (navigation, filters), not content.
 
+### **2.1 Liquid Glass (iOS 26 / macOS 26)**
+
+**Principles**
+
+- Use translucent materials to clarify hierarchy and preserve context.
+- Prefer glass for chrome (navigation, filters) and overlays; keep dense text on opaque content surfaces.
+- Always respect Reduce Transparency/Motion and maintain minimum contrast.
+
+**Material mapping**
+
+- `chrome` → Liquid Glass Chrome (thin). Fallback: `.ultraThinMaterial` with backdrop dim when needed.
+- `overlay` → Liquid Glass Overlay (regular) + adaptive dim. Fallback: `.regularMaterial` + dim.
+- `content` → Opaque surface for readability (no glass).
+
+**Tokens to add**
+
+- `material.glass.chrome`, `material.glass.overlay` with platform-conditional mapping.
+- `material.glass.tint.{neutral,primary,danger}` (adaptive alpha for stable contrast across modes).
+- `stroke.hairline` (1px) and `specular.micro` for subtle press/hover highlight.
+
+**Accessibility**
+
+- When `Reduce Transparency` is ON, force `surface/solidFallback` and disable specular effects.
+- Auto-apply backdrop dim under glass if dynamic backgrounds reduce contrast.
+
+**Performance**
+
+- Avoid deep nesting of live materials inside scrolling content.
+- Prefer glass in headers, footers, toolbars, overlays; keep list rows/cards opaque.
+
+**Developer note**
+
+- Gate Liquid Glass behind a `liquidGlassEnabled` feature flag and platform checks; use SwiftUI `Material` as fallback.
+
 ---
 
 ## **3\) Color system (tokenized)**
@@ -161,12 +195,14 @@ Keep brand colors, but route all usage through **semantic roles** so system mode
 * Candidates for Liquid-Glass material.
 
 * Provide `SurfaceStyle.chrome` token to swap material when API is available; otherwise use `ultraThinMaterial` with auto-contrast guard.
+* Add a 1px hairline bottom stroke for separation; increase to 2px when Increase Contrast is ON.
 
 ### **8.6 Overlays (Sheet/Popover/Toast)**
 
 * Use sheet for compose; popover for quick edits; non-blocking **banner** for sync status.
 
 * Enforce overlay contrast with automatic backdrop dim.
+* Use Liquid Glass overlay material with adaptive dim on iOS 26/macOS 26; fallback to `.regularMaterial`.
 
 ### **8.7 Widgets**
 
@@ -272,7 +308,7 @@ extension View {
 - Better performance without UIKit bridging
 - Simplified accessibility testing with known color values
 
-*When Liquid Glass APIs are available*, you’ll flip the `.thinMaterial`/`.regularMaterial` branches to the new materials under a single feature flag.
+*When Liquid Glass APIs are available*, you’ll flip the `.thinMaterial`/`.regularMaterial` branches to the new materials under a single feature flag. Centralize mapping in a `Materials` utility so only one implementation point changes.
 
 ---
 

@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import Supabase
 
 @MainActor
 final class SyncService: ObservableObject {
@@ -122,6 +123,12 @@ final class SyncService: ObservableObject {
             }
             
             lastSyncDate = Date()
+            // Weekly rollover: run from Saturday 00:00 (local) onward, once per upcoming week
+            let didRollover = await WeeklyRolloverService().performIfNeeded(userId: userId)
+            if didRollover {
+                // Refresh local state after rollover so UI reflects moves
+                NotificationCenter.default.post(name: Notification.Name("dm.remote.tasks.changed"), object: nil)
+            }
             Logger.shared.info("Sync completed successfully", category: .sync)
             
         } catch {
@@ -320,12 +327,24 @@ final class SyncService: ObservableObject {
         if !pendingLinks.isEmpty {
             Logger.shared.info("Pushing \(pendingLinks.count) task-label link changes", category: .sync)
             for link in pendingLinks {
-                if link.deletedAt == nil {
-                    try await remoteLabelsRepository.link(link)
-                } else {
-                    try await remoteLabelsRepository.unlink(taskId: link.taskId, labelId: link.labelId)
+                do {
+                    if link.deletedAt == nil {
+                        try await remoteLabelsRepository.link(link)
+                    } else {
+                        try await remoteLabelsRepository.unlink(taskId: link.taskId, labelId: link.labelId)
+                    }
+                    try await localLabelsRepository.markTaskLabelLinkSynced(taskId: link.taskId, labelId: link.labelId)
+                } catch {
+                    if let pgError = error as? PostgrestError,
+                       pgError.message.contains("violates foreign key constraint \"task_labels_task_id_fkey\"") {
+                        // The remote task does not exist; discard the local link to avoid infinite retries
+                        Logger.shared.error("Discarding task-label link due to missing remote task id=\(link.taskId)", category: .sync, error: error)
+                        // Soft-delete locally; will translate to a harmless remote unlink (no-op) next cycle
+                        try? await localLabelsRepository.removeLabel(link.labelId, from: link.taskId, for: link.userId)
+                        continue
+                    }
+                    throw error
                 }
-                try await localLabelsRepository.markTaskLabelLinkSynced(taskId: link.taskId, labelId: link.labelId)
             }
         }
 
@@ -544,6 +563,15 @@ final class SyncService: ObservableObject {
                 try await operation()
                 return
             } catch {
+                // Do not retry on unique constraint violations or invalid ON CONFLICT targets; reconcile instead upstream
+                if let pgError = error as? PostgrestError {
+                    let message = pgError.message
+                    if message.contains("duplicate key value violates unique constraint") ||
+                        message.contains("there is no unique or exclusion constraint matching the ON CONFLICT specification") {
+                        Logger.shared.error("Not retrying due to constraint error", category: .sync, error: error)
+                        throw error
+                    }
+                }
                 lastError = error
                 attempt += 1
                 let backoff = min(pow(2.0, Double(attempt)), 30.0)

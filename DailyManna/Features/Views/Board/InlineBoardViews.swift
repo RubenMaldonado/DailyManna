@@ -9,13 +9,12 @@ struct InlineBoardView: View {
     var body: some View {
         ScrollView(.horizontal) {
             HStack(spacing: Spacing.medium) {
-                ForEach(buckets, id: \\.rawValue) { bucket in
+                ForEach(buckets, id: \.rawValue) { (bucket: TimeBucket) in
                     if bucket == .thisWeek && viewModel.featureThisWeekSectionsEnabled {
                         InlineThisWeekColumn(
                             tasksWithLabels: viewModel.tasksWithLabels.filter { $0.0.bucketKey == .thisWeek },
                             subtaskProgressByParent: viewModel.subtaskProgressByParent,
                             tasksWithRecurrence: viewModel.tasksWithRecurrence,
-                            userId: viewModel.userId,
                             isSectionCollapsed: { key in viewModel.isSectionCollapsed(dayKey: key) },
                             toggleSectionCollapsed: { key in viewModel.toggleSectionCollapsed(for: key) },
                             schedule: { id, date in _Concurrency.Task { await viewModel.schedule(taskId: id, to: date) } },
@@ -29,9 +28,7 @@ struct InlineBoardView: View {
                             onGenerateNow: { id in _Concurrency.Task { await viewModel.generateNow(taskId: id) } },
                             onAdd: {
                                 viewModel.presentCreateForm(bucket: .thisWeek)
-                            },
-                            onToggleLabel: { taskId, labelId in viewModel.toggleLabel(taskId: taskId, labelId: labelId) },
-                            onSetLabels: { taskId, desired in _Concurrency.Task { await viewModel.setLabels(taskId: taskId, to: desired) } }
+                            }
                         )
                         .id(bucket.rawValue)
                     } else if bucket == .nextWeek && viewModel.featureNextWeekSectionsEnabled {
@@ -39,7 +36,6 @@ struct InlineBoardView: View {
                             tasksWithLabels: viewModel.tasksWithLabels.filter { $0.0.bucketKey == .nextWeek },
                             subtaskProgressByParent: viewModel.subtaskProgressByParent,
                             tasksWithRecurrence: viewModel.tasksWithRecurrence,
-                            userId: viewModel.userId,
                             isSectionCollapsed: { key in viewModel.isSectionCollapsed(dayKey: key) },
                             toggleSectionCollapsed: { key in viewModel.toggleSectionCollapsed(for: key) },
                             schedule: { id, date in _Concurrency.Task { await viewModel.schedule(taskId: id, to: date) } },
@@ -53,9 +49,7 @@ struct InlineBoardView: View {
                             onGenerateNow: { id in _Concurrency.Task { await viewModel.generateNow(taskId: id) } },
                             onAdd: {
                                 viewModel.presentCreateForm(bucket: .nextWeek)
-                            },
-                            onToggleLabel: { taskId, labelId in viewModel.toggleLabel(taskId: taskId, labelId: labelId) },
-                            onSetLabels: { taskId, desired in _Concurrency.Task { await viewModel.setLabels(taskId: taskId, to: desired) } }
+                            }
                         )
                         .id(bucket.rawValue)
                     } else {
@@ -143,6 +137,7 @@ struct InlineStandardBucketColumn: View {
                         TaskCard(
                             task: pair.0,
                             labels: pair.1,
+                            layout: .board,
                             highlighted: (bucket == .thisWeek && pair.0.bucketKey != .thisWeek) || (bucket == .nextWeek && pair.0.bucketKey != .nextWeek),
                             onToggleCompletion: { onToggle(pair.0) },
                             subtaskProgress: subtaskProgressByParent[pair.0.id],
@@ -359,7 +354,7 @@ struct InlineThisWeekColumn: View {
                     Image(systemName: isSectionCollapsed("unplanned") ? "chevron.right" : "chevron.down")
                 }
                 .buttonStyle(.plain)
-                Image(systemName: "tray.slash")
+                Image(systemName: "tray")
                     .foregroundColor(Colors.onSurface)
                 Text("Unplanned")
                     .style(Typography.title3)
@@ -381,6 +376,7 @@ struct InlineThisWeekColumn: View {
                         TaskCard(
                             task: pair.0,
                             labels: pair.1,
+                            layout: .board,
                             onToggleCompletion: { onToggle(pair.0) },
                             subtaskProgress: subtaskProgressByParent[pair.0.id],
                             showsRecursIcon: tasksWithRecurrence.contains(pair.0.id),
@@ -417,6 +413,7 @@ struct InlineThisWeekColumn: View {
         TaskCard(
             task: pair.0,
             labels: pair.1,
+            layout: .board,
             onToggleCompletion: { onToggle(pair.0) },
             subtaskProgress: subtaskProgressByParent[pair.0.id],
             showsRecursIcon: tasksWithRecurrence.contains(pair.0.id),
@@ -528,6 +525,7 @@ struct InlineNextWeekColumn: View {
         TaskCard(
             task: pair.0,
             labels: pair.1,
+            layout: .board,
             onToggleCompletion: { onToggle(pair.0) },
             subtaskProgress: subtaskProgressByParent[pair.0.id],
             showsRecursIcon: tasksWithRecurrence.contains(pair.0.id),
@@ -567,7 +565,7 @@ struct InlineNextWeekColumn: View {
             HStack {
                 Button(action: { toggleSectionCollapsed("unplanned") }) { Image(systemName: isSectionCollapsed("unplanned") ? "chevron.right" : "chevron.down") }
                 .buttonStyle(.plain)
-                Image(systemName: "tray.slash").foregroundColor(Colors.onSurface)
+                Image(systemName: "tray").foregroundColor(Colors.onSurface)
                 Text("Unplanned").style(Typography.title3).foregroundColor(Colors.onSurface)
                 Spacer()
             }
@@ -698,5 +696,6 @@ struct BoardRowFramePreferenceKey: PreferenceKey {
     .background(Colors.background)
 }
 #endif
+
 
 

@@ -123,7 +123,7 @@ struct NextWeekSectionsListView: View {
     @ViewBuilder
     private var unplannedHeader: some View {
         HStack {
-            Image(systemName: "tray.slash").foregroundColor(Colors.onSurface)
+            Image(systemName: "tray").foregroundColor(Colors.onSurface)
             Text("Unplanned").style(Typography.title3).foregroundColor(Colors.onSurface)
             Spacer()
         }

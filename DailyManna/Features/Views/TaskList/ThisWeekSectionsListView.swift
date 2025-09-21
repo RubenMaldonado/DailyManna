@@ -153,7 +153,7 @@ struct ThisWeekSectionsListView: View {
                 Image(systemName: viewModel.isSectionCollapsed(dayKey: "unplanned") ? "chevron.right" : "chevron.down")
             }
             .buttonStyle(.plain)
-            Image(systemName: "tray.slash")
+            Image(systemName: "tray")
                 .foregroundColor(Colors.onSurface)
             Text("Unplanned")
                 .style(Typography.title3)
