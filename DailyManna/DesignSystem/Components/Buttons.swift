@@ -67,4 +67,60 @@ struct DestructiveButtonStyle: ButtonStyle {
     }
 }
 
+struct GlassSecondaryButtonStyle: ButtonStyle {
+    var size: ButtonSize = .regular
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    func makeBody(configuration: Configuration) -> some View {
+        let base = configuration.label
+            .padding(.horizontal, size.horizontalPadding)
+            .padding(.vertical, size.verticalPadding)
+            .frame(minHeight: size.minHeight)
+            .clipShape(Capsule())
+            .overlay(
+                Capsule().stroke(Materials.hairlineColor, lineWidth: 1)
+            )
+            .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
+            .animation(.easeInOut(duration: 0.15), value: configuration.isPressed)
+        if reduceTransparency {
+            return AnyView(base
+                .background(Colors.surfaceVariant.opacity(isEnabled ? 1.0 : 0.6))
+                .foregroundColor(Colors.onSurface.opacity(isEnabled ? 1.0 : 0.6))
+            )
+        } else {
+            return AnyView(base
+                .background(Materials.glassChrome)
+                .overlay(GlassEffects.specularOverlay(opacity: configuration.isPressed ? 0.22 : 0.12).clipShape(Capsule()))
+                .foregroundColor(Colors.onSurface)
+            )
+        }
+    }
+}
+
+struct GlassTertiaryButtonStyle: ButtonStyle {
+    var size: ButtonSize = .regular
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    func makeBody(configuration: Configuration) -> some View {
+        let base = configuration.label
+            .padding(.horizontal, size.horizontalPadding)
+            .padding(.vertical, size.verticalPadding)
+            .frame(minHeight: size.minHeight)
+            .clipShape(Capsule())
+            .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
+            .animation(.easeInOut(duration: 0.15), value: configuration.isPressed)
+        if reduceTransparency {
+            return AnyView(base
+                .background(Colors.surface.opacity(0.0))
+                .foregroundColor(Colors.onSurface.opacity(isEnabled ? 0.8 : 0.5))
+            )
+        } else {
+            return AnyView(base
+                .background(Materials.glassChrome)
+                .foregroundColor(Colors.onSurface.opacity(isEnabled ? 0.9 : 0.5))
+            )
+        }
+    }
+}
+
 
