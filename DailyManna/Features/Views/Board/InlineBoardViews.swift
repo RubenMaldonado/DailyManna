@@ -9,7 +9,7 @@ struct InlineBoardView: View {
     var body: some View {
         ScrollView(.horizontal) {
             HStack(spacing: Spacing.medium) {
-                ForEach(buckets, id: \.id) { bucket in
+                ForEach(buckets, id: \\.rawValue) { bucket in
                     if bucket == .thisWeek && viewModel.featureThisWeekSectionsEnabled {
                         InlineThisWeekColumn(
                             tasksWithLabels: viewModel.tasksWithLabels.filter { $0.0.bucketKey == .thisWeek },
