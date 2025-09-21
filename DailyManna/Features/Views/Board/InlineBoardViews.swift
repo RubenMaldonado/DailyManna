@@ -9,12 +9,13 @@ struct InlineBoardView: View {
     var body: some View {
         ScrollView(.horizontal) {
             HStack(spacing: Spacing.medium) {
-                ForEach(buckets) { bucket in
+                ForEach(buckets, id: \.id) { bucket in
                     if bucket == .thisWeek && viewModel.featureThisWeekSectionsEnabled {
                         InlineThisWeekColumn(
                             tasksWithLabels: viewModel.tasksWithLabels.filter { $0.0.bucketKey == .thisWeek },
                             subtaskProgressByParent: viewModel.subtaskProgressByParent,
                             tasksWithRecurrence: viewModel.tasksWithRecurrence,
+                            userId: viewModel.userId,
                             isSectionCollapsed: { key in viewModel.isSectionCollapsed(dayKey: key) },
                             toggleSectionCollapsed: { key in viewModel.toggleSectionCollapsed(for: key) },
                             schedule: { id, date in _Concurrency.Task { await viewModel.schedule(taskId: id, to: date) } },
@@ -28,7 +29,9 @@ struct InlineBoardView: View {
                             onGenerateNow: { id in _Concurrency.Task { await viewModel.generateNow(taskId: id) } },
                             onAdd: {
                                 viewModel.presentCreateForm(bucket: .thisWeek)
-                            }
+                            },
+                            onToggleLabel: { taskId, labelId in viewModel.toggleLabel(taskId: taskId, labelId: labelId) },
+                            onSetLabels: { taskId, desired in _Concurrency.Task { await viewModel.setLabels(taskId: taskId, to: desired) } }
                         )
                         .id(bucket.rawValue)
                     } else if bucket == .nextWeek && viewModel.featureNextWeekSectionsEnabled {
@@ -36,6 +39,7 @@ struct InlineBoardView: View {
                             tasksWithLabels: viewModel.tasksWithLabels.filter { $0.0.bucketKey == .nextWeek },
                             subtaskProgressByParent: viewModel.subtaskProgressByParent,
                             tasksWithRecurrence: viewModel.tasksWithRecurrence,
+                            userId: viewModel.userId,
                             isSectionCollapsed: { key in viewModel.isSectionCollapsed(dayKey: key) },
                             toggleSectionCollapsed: { key in viewModel.toggleSectionCollapsed(for: key) },
                             schedule: { id, date in _Concurrency.Task { await viewModel.schedule(taskId: id, to: date) } },
@@ -49,7 +53,9 @@ struct InlineBoardView: View {
                             onGenerateNow: { id in _Concurrency.Task { await viewModel.generateNow(taskId: id) } },
                             onAdd: {
                                 viewModel.presentCreateForm(bucket: .nextWeek)
-                            }
+                            },
+                            onToggleLabel: { taskId, labelId in viewModel.toggleLabel(taskId: taskId, labelId: labelId) },
+                            onSetLabels: { taskId, desired in _Concurrency.Task { await viewModel.setLabels(taskId: taskId, to: desired) } }
                         )
                         .id(bucket.rawValue)
                     } else {
@@ -87,7 +93,9 @@ struct InlineBoardView: View {
                             },
                             onPauseResume: { id in _Concurrency.Task { await viewModel.pauseResume(taskId: id) } },
                             onSkipNext: { id in _Concurrency.Task { await viewModel.skipNext(taskId: id) } },
-                            onGenerateNow: { id in _Concurrency.Task { await viewModel.generateNow(taskId: id) } }
+                            onGenerateNow: { id in _Concurrency.Task { await viewModel.generateNow(taskId: id) } },
+                            onToggleLabel: { taskId, labelId in viewModel.toggleLabel(taskId: taskId, labelId: labelId) },
+                            onSetLabels: { taskId, desired in _Concurrency.Task { await viewModel.setLabels(taskId: taskId, to: desired) } }
                         )
                         .id(bucket.rawValue)
                     }
@@ -115,11 +123,16 @@ struct InlineStandardBucketColumn: View {
     let onPauseResume: (UUID) -> Void
     let onSkipNext: (UUID) -> Void
     let onGenerateNow: (UUID) -> Void
+    let onToggleLabel: (UUID, UUID) -> Void
+    let onSetLabels: (UUID, Set<UUID>) -> Void
     @State private var rowFrames: [UUID: CGRect] = [:]
     @State private var isDragActive: Bool = false
     @State private var insertBeforeId: UUID? = nil
     @State private var showEndIndicator: Bool = false
     @State private var dragFrames: [UUID: CGRect] = [:]
+    @State private var showingLabelsSheet: Bool = false
+    @State private var editingLabelsTaskId: UUID? = nil
+    @State private var selectedLabelIdsForSheet: Set<UUID> = []
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xSmall) {
             BucketHeader(bucket: bucket, count: tasksWithLabels.count, onAdd: onAdd)
@@ -139,6 +152,27 @@ struct InlineStandardBucketColumn: View {
                             onGenerateNow: { onGenerateNow(pair.0.id) }
                         )
                         .contextMenu {
+                            Menu("Labels") {
+                                let top = topLabels(in: tasksWithLabels, limit: 15)
+                                let currentIds = Set(pair.1.map { $0.id })
+                                ForEach(top) { label in
+                                    let isSelected = currentIds.contains(label.id)
+                                    Button(action: { onToggleLabel(pair.0.id, label.id) }) {
+                                        HStack {
+                                            Circle().fill(label.uiColor).frame(width: 10, height: 10)
+                                            Text(label.name)
+                                            if isSelected { Image(systemName: "checkmark") }
+                                        }
+                                    }
+                                }
+                                Divider()
+                                Button("Edit labels…") {
+                                    editingLabelsTaskId = pair.0.id
+                                    selectedLabelIdsForSheet = currentIds
+                                    showingLabelsSheet = true
+                                    Telemetry.record(.labelEditSheetOpened)
+                                }
+                            }
                             Menu("Move to") {
                                 ForEach(TimeBucket.allCases.sorted { $0.sortOrder < $1.sortOrder }) { dest in
                                     Button(dest.displayName) { onMove(pair.0.id, dest) }
@@ -182,6 +216,34 @@ struct InlineStandardBucketColumn: View {
             onBegin: { dragFrames = rowFrames },
             onEnd: { dragFrames = [:] }
         ))
+        .sheet(isPresented: $showingLabelsSheet) {
+            // Approximate userId from any pair if needed; callers pass set on commit
+            LabelMultiSelectSheet(userId: tasksWithLabels.first?.0.userId ?? UUID(), selected: $selectedLabelIdsForSheet)
+        }
+        .onChange(of: showingLabelsSheet) { _, newValue in
+            if newValue == false, let tid = editingLabelsTaskId {
+                onSetLabels(tid, selectedLabelIdsForSheet)
+                editingLabelsTaskId = nil
+            }
+        }
+    }
+
+    private func topLabels(in pairs: [(Task, [Label])], limit: Int = 15) -> [Label] {
+        var counts: [UUID: Int] = [:]
+        var byId: [UUID: Label] = [:]
+        for (_, labels) in pairs {
+            for label in labels {
+                counts[label.id, default: 0] += 1
+                byId[label.id] = label
+            }
+        }
+        return counts
+            .sorted { (lhs, rhs) in
+                if lhs.value == rhs.value { return (byId[lhs.key]?.name ?? "") < (byId[rhs.key]?.name ?? "") }
+                return lhs.value > rhs.value
+            }
+            .prefix(limit)
+            .compactMap { byId[$0.key] }
     }
 }
 
@@ -629,7 +691,9 @@ struct BoardRowFramePreferenceKey: PreferenceKey {
         onAdd: {},
         onPauseResume: {_ in},
         onSkipNext: {_ in},
-        onGenerateNow: {_ in}
+        onGenerateNow: {_ in},
+        onToggleLabel: {_,_ in},
+        onSetLabels: {_,_ in}
     )
     .background(Colors.background)
 }

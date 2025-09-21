@@ -13,6 +13,7 @@ import Foundation
 @MainActor
 final class TaskListViewModel: ObservableObject {
     @Published var tasksWithLabels: [(Task, [Label])] = []
+    @Published var allLabels: [Label] = []
     @Published var tasksWithRecurrence: Set<UUID> = []
     @Published var subtaskProgressByParent: [UUID: (completed: Int, total: Int)] = [:]
     @Published var isLoading: Bool = false
@@ -141,6 +142,70 @@ final class TaskListViewModel: ObservableObject {
         }
     }
     
+    // MARK: - Labels: Load all, toggle quick, and set full
+    func loadAllLabels() async {
+        do {
+            let labels = try await labelUseCases.fetchLabels(for: userId)
+            await MainActor.run { self.allLabels = labels }
+        } catch {
+            Logger.shared.error("Failed to load labels", category: .ui, error: error)
+        }
+    }
+
+    /// Optimistically toggle a single label assignment for a task.
+    func toggleLabel(taskId: UUID, labelId: UUID) {
+        guard let index = tasksWithLabels.firstIndex(where: { $0.0.id == taskId }) else { return }
+        var pair = tasksWithLabels[index]
+        let hasIt = pair.1.contains(where: { $0.id == labelId })
+        if hasIt {
+            pair.1.removeAll { $0.id == labelId }
+        } else if let label = allLabels.first(where: { $0.id == labelId }) {
+            pair.1.append(label)
+        }
+        tasksWithLabels[index] = pair
+
+        _Concurrency.Task {
+            do {
+                if hasIt {
+                    try await labelUseCases.removeLabel(labelId, from: taskId, for: userId)
+                } else {
+                    try await labelUseCases.addLabel(labelId, to: taskId, for: userId)
+                }
+                Telemetry.record(.labelQuickToggled)
+            } catch {
+                await MainActor.run {
+                    // Revert on failure
+                    if hasIt, let label = allLabels.first(where: { $0.id == labelId }) {
+                        if let revertIdx = tasksWithLabels.firstIndex(where: { $0.0.id == taskId }) {
+                            tasksWithLabels[revertIdx].1.append(label)
+                        }
+                    } else {
+                        if let revertIdx = tasksWithLabels.firstIndex(where: { $0.0.id == taskId }) {
+                            tasksWithLabels[revertIdx].1.removeAll { $0.id == labelId }
+                        }
+                    }
+                    errorMessage = "Failed to update labels: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    /// Apply a full label set for a task (used by the sheet flow)
+    func setLabels(taskId: UUID, to desired: Set<UUID>) async {
+        do {
+            _ = try await Logger.shared.time("applyLabelSet", category: .perf) {
+                try await taskUseCases.setLabels(for: taskId, to: desired, userId: userId)
+            }
+            // Update local state to reflect final selection
+            if let index = tasksWithLabels.firstIndex(where: { $0.0.id == taskId }) {
+                let newLabels = allLabels.filter { desired.contains($0.id) }
+                tasksWithLabels[index].1 = newLabels
+            }
+        } catch {
+            await MainActor.run { self.errorMessage = "Failed to apply labels: \(error.localizedDescription)" }
+        }
+    }
+
     func fetchTasks(in bucket: TimeBucket? = nil, showLoading: Bool = true) async {
         // Single-flight guard: coalesce overlapping fetches
         if fetchInFlight {

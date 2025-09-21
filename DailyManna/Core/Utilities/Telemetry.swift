@@ -30,6 +30,9 @@ enum TelemetryEvent: String {
     // Auto-bucketing
     case autoBucketAssigned
     case autoBucketFlip
+    // Labels
+    case labelQuickToggled
+    case labelEditSheetOpened
 }
 
 enum Telemetry {
