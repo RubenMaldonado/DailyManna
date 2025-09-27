@@ -302,8 +302,6 @@ struct TaskListView: View {
                 } else if let errorMessage = viewModel.errorMessage {
                     Banner(kind: .error, message: errorMessage)
                         .padding(.horizontal)
-                } else {
-                    AllBucketsListView(viewModel: viewModel, userId: userId)
                 }
                 if workingLogVM.isOpen {
                     Divider()
