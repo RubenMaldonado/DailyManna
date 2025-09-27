@@ -74,10 +74,6 @@ struct TaskListView: View {
         // Leave header in its natural position; content manages split with panel on the side
         .task {
             await viewModel.refreshCounts()
-            // Enable explicit all-buckets mode for the unified list
-            viewModel.forceAllBuckets = true
-            if featureBoardOnly { viewModel.isBoardModeActive = true }
-            // Fetch all buckets for list mode; board also uses all buckets
             await viewModel.fetchTasks(in: nil)
             await viewModel.initialSyncIfNeeded()
             viewModel.startPeriodicSync()
@@ -92,7 +88,7 @@ struct TaskListView: View {
                 viewModel.stopPeriodicSync()
             }
         }
-        .onAppear { _Concurrency.Task { viewModel.forceAllBuckets = true; await viewModel.fetchTasks(in: nil) } }
+        .onAppear { _Concurrency.Task { await viewModel.fetchTasks(in: nil) } }
         #if !os(macOS)
         .onChange(of: viewMode) { _, newMode in
             Logger.shared.info("View mode changed -> \(newMode.rawValue)", category: .ui)
@@ -133,7 +129,7 @@ struct TaskListView: View {
                     _Concurrency.Task { await viewModel.save(draft: draft) }
                 } onCancel: {}
             } else {
-                let draft = viewModel.prefilledDraft ?? TaskDraft(userId: userId, bucket: viewModel.selectedBucket)
+                let draft = viewModel.prefilledDraft ?? TaskDraft(userId: userId, bucket: .thisWeek)
                 TaskComposerView(draft: draft) { draft in
                     _Concurrency.Task { await viewModel.save(draft: draft) }
                 } onCancel: {}

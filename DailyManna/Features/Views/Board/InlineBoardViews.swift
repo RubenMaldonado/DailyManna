@@ -82,6 +82,7 @@ struct InlineBoardView: View {
                                     draft.dueAt = nil
                                     draft.dueHasTime = false
                                 }
+                                // selectedBucket no longer drives fetches; keep for draft prefills only if needed
                                 viewModel.selectedBucket = bucket
                                 viewModel.editingTask = nil
                                 viewModel.isPresentingTaskForm = true

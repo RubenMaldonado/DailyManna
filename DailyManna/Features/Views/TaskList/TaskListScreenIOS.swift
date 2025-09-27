@@ -105,7 +105,7 @@ struct TaskListScreenIOS: View {
             selectedLabelIds: viewModel.activeFilterLabelIds,
             availableOnly: viewModel.availableOnly,
             unlabeledOnly: viewModel.unlabeledOnly,
-            onRemoveLabel: { id in viewModel.activeFilterLabelIds.remove(id); _Concurrency.Task { await viewModel.fetchTasks(in: viewModel.selectedBucket) } },
+            onRemoveLabel: { id in viewModel.activeFilterLabelIds.remove(id); _Concurrency.Task { await viewModel.fetchTasks(in: nil) } },
             onClearAll: { viewModel.clearFilters() }
         )
         .padding(.horizontal)
@@ -201,7 +201,7 @@ struct TaskListScreenIOS: View {
             let draft = TaskDraft(from: editing)
             TaskFormView(isEditing: true, draft: draft) { draft in _Concurrency.Task { await viewModel.save(draft: draft) } } onCancel: {}
         } else {
-            let draft = viewModel.prefilledDraft ?? TaskDraft(userId: userId, bucket: viewModel.selectedBucket)
+            let draft = viewModel.prefilledDraft ?? TaskDraft(userId: userId, bucket: .thisWeek)
             TaskComposerView(draft: draft) { draft in _Concurrency.Task { await viewModel.save(draft: draft) } } onCancel: {}
                 .environmentObject(authService)
         }
