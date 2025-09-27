@@ -6,19 +6,22 @@ struct MacToolbarHost: View {
     let userId: UUID
     @EnvironmentObject private var viewModeStore: ViewModeStore
     @EnvironmentObject private var workingLogVM: WorkingLogPanelViewModel
+    @AppStorage("feature.boardOnly") private var featureBoardOnly: Bool = false
 
     var body: some View {
         TaskListView(viewModel: viewModel, userId: userId)
             .toolbar {
                 // View switcher
-                ToolbarItem(placement: .automatic) {
-                    Picker("View", selection: $viewModeStore.mode) {
-                        Image(systemName: "list.bullet").tag(TaskListView.ViewMode.list)
-                        Image(systemName: "rectangle.grid.2x2").tag(TaskListView.ViewMode.board)
+                if featureBoardOnly == false {
+                    ToolbarItem(placement: .automatic) {
+                        Picker("View", selection: $viewModeStore.mode) {
+                            Image(systemName: "list.bullet").tag(TaskListView.ViewMode.list)
+                            Image(systemName: "rectangle.grid.2x2").tag(TaskListView.ViewMode.board)
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(width: 140)
+                        .accessibilityIdentifier("toolbar.viewMode")
                     }
-                    .pickerStyle(.segmented)
-                    .frame(width: 140)
-                    .accessibilityIdentifier("toolbar.viewMode")
                 }
                 // Leading status
                 ToolbarItem(placement: .status) {

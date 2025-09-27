@@ -26,6 +26,7 @@ struct TaskListView: View {
     @Environment(\.scenePhase) private var scenePhase
     // Throttle to avoid re-entrant toolbar updates when opening filter
     @State private var lastFilterOpenAt: TimeInterval = 0
+    @AppStorage("feature.boardOnly") private var featureBoardOnly: Bool = false
     #if !os(macOS)
     @Environment(\.horizontalSizeClass) private var hSizeClass
     @State private var showBoard: Bool = false
@@ -51,9 +52,9 @@ struct TaskListView: View {
     // Cross-platform view mode accessor: macOS reads from toolbar store; iOS uses local state
     private var currentViewMode: ViewMode {
         #if os(macOS)
-        return viewModeStore.mode
+        return featureBoardOnly ? .board : viewModeStore.mode
         #else
-        return viewMode
+        return featureBoardOnly ? .board : viewMode
         #endif
     }
     
