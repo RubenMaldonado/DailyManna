@@ -92,7 +92,7 @@ struct TaskListView: View {
                 viewModel.stopPeriodicSync()
             }
         }
-        .onAppear { _Concurrency.Task { viewModel.forceAllBuckets = true; if featureBoardOnly { viewModel.isBoardModeActive = true }; await viewModel.fetchTasks(in: nil) } }
+        .onAppear { _Concurrency.Task { viewModel.forceAllBuckets = true; await viewModel.fetchTasks(in: nil) } }
         #if !os(macOS)
         .onChange(of: viewMode) { _, newMode in
             Logger.shared.info("View mode changed -> \(newMode.rawValue)", category: .ui)
@@ -121,10 +121,7 @@ struct TaskListView: View {
         }
         #if os(macOS)
         .onChange(of: viewModeStore.mode) { _, mode in
-            _Concurrency.Task {
-                viewModel.isBoardModeActive = (mode == .board)
-                await viewModel.fetchTasks(in: nil)
-            }
+            _Concurrency.Task { await viewModel.fetchTasks(in: nil) }
             Logger.shared.info("View mode changed -> \(mode.rawValue)", category: .ui)
             Telemetry.record(.viewSwitch, metadata: ["mode": mode.rawValue])
         }

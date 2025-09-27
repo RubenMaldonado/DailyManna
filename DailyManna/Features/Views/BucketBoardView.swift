@@ -100,12 +100,7 @@ struct BucketBoardView: View {
             }
         }
         #endif
-        .onAppear {
-            viewModel.isBoardModeActive = true
-        }
-        .onDisappear {
-            viewModel.isBoardModeActive = false
-        }
+        // Board-only: no need to toggle isBoardModeActive
         .sheet(isPresented: Binding(get: { viewModel.isPresentingTaskForm }, set: { if !$0 { viewModel.isPresentingTaskForm = false } })) {
             if let editing = viewModel.editingTask {
                 TaskFormView(isEditing: true, draft: TaskDraft(from: editing)) { draft in

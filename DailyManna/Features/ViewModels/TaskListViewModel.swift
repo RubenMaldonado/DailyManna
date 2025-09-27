@@ -843,7 +843,7 @@ final class TaskListViewModel: ObservableObject {
         do {
             try await taskUseCases.deleteTask(by: task.id, for: userId)
             await refreshCounts()
-            await fetchTasks(in: isBoardModeActive ? nil : filter)
+            await fetchTasks(in: nil)
         } catch {
             errorMessage = "Failed to delete task: \(error.localizedDescription)"
             Logger.shared.error("Failed to delete task", category: .ui, error: error)
@@ -872,7 +872,7 @@ final class TaskListViewModel: ObservableObject {
                 try await taskUseCases.moveTask(id: taskId, to: bucket, for: userId)
             }
             await refreshCounts()
-            await fetchTasks(in: filter)
+            await fetchTasks(in: nil)
         } catch {
             errorMessage = "Failed to move task: \(error.localizedDescription)"
             Logger.shared.error("Failed to move task", category: .ui, error: error)

@@ -35,7 +35,6 @@ struct TaskListScreenIOS: View {
         .task {
             await viewModel.refreshCounts()
             viewModel.forceAllBuckets = true
-            if featureBoardOnly { viewModel.isBoardModeActive = true }
             await viewModel.fetchTasks(in: nil)
             await viewModel.initialSyncIfNeeded()
             viewModel.startPeriodicSync()
@@ -50,7 +49,7 @@ struct TaskListScreenIOS: View {
                 viewModel.stopPeriodicSync()
             }
         }
-        .onAppear { _Concurrency.Task { viewModel.forceAllBuckets = true; if featureBoardOnly { viewModel.isBoardModeActive = true }; await viewModel.fetchTasks(in: nil) } }
+        .onAppear { _Concurrency.Task { viewModel.forceAllBuckets = true; await viewModel.fetchTasks(in: nil) } }
         .onChange(of: viewMode) { _, newMode in
             Logger.shared.info("View mode changed -> \(newMode.rawValue)", category: .ui)
             Telemetry.record(.viewSwitch, metadata: ["mode": newMode.rawValue])

@@ -2,7 +2,8 @@ import SwiftUI
 
 #if os(macOS)
 final class ViewModeStore: ObservableObject {
-    @Published var mode: TaskListView.ViewMode = .list
+    // Board-only: minimal stub for compatibility; always board
+    @Published var mode: TaskListView.ViewMode = .board
 }
 #endif
 
