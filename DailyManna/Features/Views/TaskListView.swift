@@ -82,6 +82,7 @@ struct TaskListView: View {
             await viewModel.refreshCounts()
             // Enable explicit all-buckets mode for the unified list
             viewModel.forceAllBuckets = true
+            if featureBoardOnly { viewModel.isBoardModeActive = true }
             // Fetch all buckets for list mode; board also uses all buckets
             await viewModel.fetchTasks(in: nil)
             await viewModel.initialSyncIfNeeded()
@@ -97,7 +98,7 @@ struct TaskListView: View {
                 viewModel.stopPeriodicSync()
             }
         }
-        .onAppear { _Concurrency.Task { viewModel.forceAllBuckets = true; await viewModel.fetchTasks(in: nil) } }
+        .onAppear { _Concurrency.Task { viewModel.forceAllBuckets = true; if featureBoardOnly { viewModel.isBoardModeActive = true }; await viewModel.fetchTasks(in: nil) } }
         #if !os(macOS)
         .onChange(of: viewMode) { _, newMode in
             Logger.shared.info("View mode changed -> \(newMode.rawValue)", category: .ui)
