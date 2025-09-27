@@ -120,7 +120,11 @@ struct TaskListScreenIOS: View {
                 .padding(.horizontal)
         } else {
             if featureBoardOnly || viewMode == .board {
-                BoardColumnsIOSView(viewModel: viewModel, userId: userId)
+                if hSizeClass == .compact {
+                    BoardPagerIOS(viewModel: viewModel, userId: userId)
+                } else {
+                    BoardColumnsIOSView(viewModel: viewModel, userId: userId)
+                }
             } else {
                 AllBucketsListView(viewModel: viewModel, userId: userId)
                     .transaction { $0.disablesAnimations = true }
