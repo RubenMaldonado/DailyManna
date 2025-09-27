@@ -109,6 +109,8 @@ actor SwiftDataLabelsRepository: LabelsRepository {
         )
         let taskLabelEntities = try modelContext.fetch(descriptor)
         let labelIds = taskLabelEntities.map { $0.labelId }
+        // Avoid SwiftData generating an invalid SQL IN () clause for empty arrays
+        if labelIds.isEmpty { return [] }
         
         let labelDescriptor = FetchDescriptor<LabelEntity>(
             predicate: #Predicate<LabelEntity> { entity in

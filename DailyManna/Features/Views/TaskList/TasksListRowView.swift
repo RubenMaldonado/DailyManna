@@ -17,9 +17,7 @@ struct TasksListRowView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xSmall) {
-                    Text(task.title)
-                        .style(Typography.headline)
-                        .strikethrough(task.isCompleted)
+                    AnimatedStrikeText(text: task.title, isStruck: task.isCompleted, lineHeight: 2, lineColor: Colors.onSurfaceVariant)
                         .foregroundColor(task.isCompleted ? Colors.onSurfaceVariant : Colors.onSurface)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -61,6 +59,8 @@ struct TasksListRowView: View {
                     Spacer(minLength: 0)
                 }
             }
+            .contentShape(Rectangle())
+            .onTapGesture { onEdit(task) }
         }
         .padding(.horizontal, Spacing.medium)
         .padding(.vertical, Spacing.xSmall)

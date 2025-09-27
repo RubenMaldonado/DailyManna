@@ -14,23 +14,27 @@ struct TaskCard: View {
     var layout: LayoutMode = .list
     var highlighted: Bool = false
     var onToggleCompletion: (() -> Void)?
+    var onOpenEdit: (() -> Void)? = nil
     var onPauseResume: (() -> Void)? = nil
     var onSkipNext: (() -> Void)? = nil
     var onGenerateNow: (() -> Void)? = nil
+    var onCompleteForever: (() -> Void)? = nil
     var showsRecursIcon: Bool = false
     var subtaskProgress: (completed: Int, total: Int)? = nil
     
-    init(task: Task, labels: [Label], layout: LayoutMode = .list, highlighted: Bool = false, onToggleCompletion: (() -> Void)? = nil, subtaskProgress: (completed: Int, total: Int)? = nil, showsRecursIcon: Bool = false, onPauseResume: (() -> Void)? = nil, onSkipNext: (() -> Void)? = nil, onGenerateNow: (() -> Void)? = nil) {
+    init(task: Task, labels: [Label], layout: LayoutMode = .list, highlighted: Bool = false, onToggleCompletion: (() -> Void)? = nil, onOpenEdit: (() -> Void)? = nil, subtaskProgress: (completed: Int, total: Int)? = nil, showsRecursIcon: Bool = false, onPauseResume: (() -> Void)? = nil, onSkipNext: (() -> Void)? = nil, onGenerateNow: (() -> Void)? = nil, onCompleteForever: (() -> Void)? = nil) {
         self.task = task
         self.labels = labels
         self.layout = layout
         self.highlighted = highlighted
         self.onToggleCompletion = onToggleCompletion
+        self.onOpenEdit = onOpenEdit
         self.subtaskProgress = subtaskProgress
         self.showsRecursIcon = showsRecursIcon
         self.onPauseResume = onPauseResume
         self.onSkipNext = onSkipNext
         self.onGenerateNow = onGenerateNow
+        self.onCompleteForever = onCompleteForever
     }
     
     var body: some View {
@@ -42,9 +46,7 @@ struct TaskCard: View {
             VStack(alignment: .leading, spacing: Spacing.xxSmall) {
                 // Title row (wrap fully, no ellipsis)
                 HStack(spacing: 6) {
-                    Text(task.title)
-                        .style(Typography.headline)
-                        .strikethrough(task.isCompleted)
+                    AnimatedStrikeText(text: task.title, isStruck: task.isCompleted, lineHeight: 2, lineColor: Colors.onSurfaceVariant)
                         .foregroundColor(task.isCompleted ? Colors.onSurfaceVariant : Colors.onSurface)
                         .fixedSize(horizontal: false, vertical: true)
                     if showsRecursIcon {
@@ -119,6 +121,8 @@ struct TaskCard: View {
                     .accessibilityValue("\(progress.completed) of \(progress.total)")
                 }
             }
+            .contentShape(Rectangle())
+            .onTapGesture { onOpenEdit?() }
             Spacer()
         }
         // Compact list rows should look lighter than board cards
@@ -133,6 +137,10 @@ struct TaskCard: View {
                 Button("Pause/Resume") { onPauseResume?() }
                 Button("Skip next") { onSkipNext?() }
                 Button("Generate now") { onGenerateNow?() }
+                Divider()
+                Button(role: .destructive) { onCompleteForever?() } label: { 
+                    Text("Complete Forever") 
+                }
             }
         }
         .transition(.asymmetric(

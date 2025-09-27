@@ -32,10 +32,11 @@ struct ThisWeekSectionsListView: View {
                                     .padding(.vertical, Spacing.small)
                             } else {
                                 ForEach(items, id: \.0.id) { pair in
+                                    let livePair = viewModel.tasksWithLabels.first(where: { $0.0.id == pair.0.id }) ?? pair
                                     if isDragActive, let insertId = insertBeforeIdByDay[section.id] ?? nil, insertId == pair.0.id {
                                         Rectangle().fill(Colors.primary).frame(height: 2).padding(.vertical, 2)
                                     }
-                                    TaskCard(task: pair.0, labels: pair.1, highlighted: pair.0.bucketKey != .thisWeek, onToggleCompletion: { onToggle(pair.0) })
+                                    TaskCard(task: livePair.0, labels: livePair.1, highlighted: livePair.0.bucketKey != .thisWeek, onToggleCompletion: { onToggle(livePair.0) }, onOpenEdit: { onEdit(livePair.0) })
                                         .contextMenu {
                                             if viewModel.thisWeekSections.firstIndex(where: { $0.id == section.id }) != nil {
                                                 let remaining = Array(viewModel.thisWeekSections.dropFirst())
@@ -53,7 +54,7 @@ struct ThisWeekSectionsListView: View {
                                             Button("Edit") { onEdit(pair.0) }
                                             Button(role: .destructive) { onDelete(pair.0) } label: { Text("Delete") }
                                         }
-                                        .onTapGesture(count: 2) { onEdit(pair.0) }
+                                        // Single-tap edit handled in TaskCard via onOpenEdit
                                         .draggable(DraggableTaskID(id: pair.0.id))
                                         .background(GeometryReader { proxy in
                                             Color.clear.preference(key: ThisWeekRowFramePreferenceKey.self, value: [pair.0.id: proxy.frame(in: .named(section.id))])
@@ -96,8 +97,9 @@ struct ThisWeekSectionsListView: View {
                                 .padding(.horizontal)
                                 .padding(.vertical, Spacing.small)
                         } else {
-                            ForEach(items, id: \.0.id) { pair in
-                                TaskCard(task: pair.0, labels: pair.1, highlighted: pair.0.bucketKey != .thisWeek, onToggleCompletion: { onToggle(pair.0) })
+                    ForEach(items, id: \.0.id) { pair in
+                        let livePair = viewModel.tasksWithLabels.first(where: { $0.0.id == pair.0.id }) ?? pair
+                        TaskCard(task: livePair.0, labels: livePair.1, highlighted: livePair.0.bucketKey != .thisWeek, onToggleCompletion: { onToggle(livePair.0) }, onOpenEdit: { onEdit(livePair.0) })
                                     .contextMenu {
                                         Menu("Schedule") {
                                             ForEach(viewModel.thisWeekSections, id: \.id) { sec in
@@ -108,7 +110,7 @@ struct ThisWeekSectionsListView: View {
                                         Button("Edit") { onEdit(pair.0) }
                                         Button(role: .destructive) { onDelete(pair.0) } label: { Text("Delete") }
                                     }
-                                    .onTapGesture(count: 2) { onEdit(pair.0) }
+                                    // Single-tap edit handled in TaskCard via onOpenEdit
                             }
                         }
                     }

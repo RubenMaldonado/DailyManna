@@ -10,6 +10,7 @@ struct TasksListView: View {
     let onMove: (UUID, TimeBucket) -> Void
     let onReorder: (UUID, Int) -> Void
     let onDelete: (Task) -> Void
+    @EnvironmentObject private var viewModelFromEnv: TaskListViewModel
     @State private var rowFrames: [UUID: CGRect] = [:]
     @State private var insertBeforeId: UUID? = nil
     @State private var showEndIndicator: Bool = false
@@ -61,7 +62,7 @@ struct TasksListView: View {
     @ViewBuilder private var content: some View {
         ForEach(tasksWithLabels, id: \.0.id) { pair in
             if isDragActive && insertBeforeId == pair.0.id { indicator }
-            TasksListRowView(task: pair.0, labels: pair.1, subtaskProgress: subtaskProgressByParent[pair.0.id], onToggle: onToggle, onEdit: onEdit, onMove: onMove, onDelete: onDelete)
+            TasksListOptimisticRow(viewModel: viewModelFromEnv, pair: pair, subtaskProgress: subtaskProgressByParent[pair.0.id], onToggle: onToggle, onEdit: onEdit, onMove: onMove, onDelete: onDelete)
                 .id(pair.0.id)
                 .draggable(DraggableTaskID(id: pair.0.id))
                 .background(GeometryReader { proxy in

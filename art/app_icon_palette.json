@@ -1,0 +1,24 @@
+{
+  "default": {
+    "backgroundTop": "#FFF3CC",
+    "backgroundBottom": "#F1A23B",
+    "bread": "#945C2A",
+    "breadShadow": "#0000002E",
+    "checkmark": "#FFFFFF"
+  },
+  "dark": {
+    "backgroundTop": "#26221D",
+    "backgroundBottom": "#141311",
+    "bread": "#D19A5C",
+    "breadShadow": "#0000004D",
+    "checkmark": "#FFFFFF"
+  },
+  "tinted": {
+    "backgroundTop": "#F8E7C2",
+    "backgroundBottom": "#D79B52",
+    "bread": "#7E5128",
+    "breadShadow": "#00000029",
+    "checkmark": "#FFFFFF"
+  }
+}
+

@@ -58,6 +58,7 @@ struct TaskListScreenIOS: View {
             if let enabled = note.userInfo?["enabled"] as? Bool { viewModel.setAvailableFilter(enabled) }
         }
         .sheet(isPresented: $viewModel.isPresentingTaskForm) { taskFormSheet() }
+        .presentationDetents([.medium])
         .sheet(isPresented: $showFilterSheet) { filterSheet() }
         .sheet(isPresented: $showSettings) { settingsSheet() }
         .toolbar { toolbarContent() }
@@ -118,19 +119,7 @@ struct TaskListScreenIOS: View {
                 .padding(.horizontal)
         } else {
             if viewMode == .board {
-                // board view remains separate on iOS
-                // reuse existing single-bucket path for now to avoid duplicate board implementation here
-                TasksListView(
-                    bucket: viewModel.selectedBucket,
-                    tasksWithLabels: viewModel.tasksWithLabels,
-                    subtaskProgressByParent: viewModel.subtaskProgressByParent,
-                    onToggle: { task in _Concurrency.Task { await viewModel.toggleTaskCompletion(task: task) } },
-                    onEdit: { task in viewModel.presentEditForm(task: task) },
-                    onMove: { taskId, bucket in _Concurrency.Task { await viewModel.move(taskId: taskId, to: bucket) } },
-                    onReorder: { taskId, targetIndex in _Concurrency.Task { await viewModel.reorder(taskId: taskId, to: viewModel.selectedBucket, targetIndex: targetIndex) } },
-                    onDelete: { task in viewModel.confirmDelete(task) }
-                )
-                .transaction { $0.disablesAnimations = true }
+                BoardColumnsIOSView(viewModel: viewModel, userId: userId)
             } else {
                 AllBucketsListView(viewModel: viewModel, userId: userId)
                     .transaction { $0.disablesAnimations = true }

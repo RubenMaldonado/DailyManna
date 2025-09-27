@@ -6,6 +6,7 @@ struct TaskComposerView: View {
     let onSubmit: (TaskDraft) -> Void
     let onCancel: () -> Void
     @EnvironmentObject private var authService: AuthenticationService
+    @FocusState private var isTitleFocused: Bool
 
     // Chip state
     @State private var showDatePicker = false
@@ -26,6 +27,7 @@ struct TaskComposerView: View {
             TextField("Task name", text: $draft.title)
                 .font(.title2)
                 .textFieldStyle(.roundedBorder)
+                .focused($isTitleFocused)
                 .onSubmit { submit() }
             // Description (native multi-line, 3x taller by default)
             #if os(macOS)
@@ -244,7 +246,13 @@ struct TaskComposerView: View {
         }
         .presentationBackground(Materials.glassOverlay)
         #endif
-        .onAppear { loadAllLabels() }
+        .onAppear {
+            loadAllLabels()
+            // Focus title on present so users can type immediately
+            #if os(iOS)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { isTitleFocused = true }
+            #endif
+        }
     }
 
     private func chipView(icon: String, text: String, isActive: Bool, activeColor: Color?, onTap: @escaping () -> Void, onClear: @escaping () -> Void) -> some View {

@@ -68,13 +68,13 @@ final class DataContainer {
             #endif
         }
         
-        let modelContext = ModelContext(modelContainer)
-        // Set merge policy to favor in-memory changes (local-first), conflict resolution handled at sync boundaries
-        modelContext.autosaveEnabled = true
+        // Use a dedicated bootstrap context for one-time setup (seeding/migrations)
+        let bootstrapContext = ModelContext(modelContainer)
+        bootstrapContext.autosaveEnabled = true
         // Seed fixed time buckets idempotently
         do {
             let bucketDescriptor = FetchDescriptor<TimeBucketEntity>()
-            let existing = try modelContext.fetch(bucketDescriptor)
+            let existing = try bootstrapContext.fetch(bucketDescriptor)
             if existing.isEmpty {
                 let buckets: [(String, String)] = [
                     (TimeBucket.thisWeek.rawValue, TimeBucket.thisWeek.displayName),
@@ -84,20 +84,32 @@ final class DataContainer {
                     (TimeBucket.routines.rawValue, TimeBucket.routines.displayName)
                 ]
                 for (key, name) in buckets {
-                    modelContext.insert(TimeBucketEntity(key: key, name: name))
+                    bootstrapContext.insert(TimeBucketEntity(key: key, name: name))
                 }
-                try modelContext.save()
+                try bootstrapContext.save()
             }
         } catch {
             // Seeding is best-effort; ignore if model not available
         }
         // Run lightweight data migrations (idempotent)
-        DataMigration.runMigrations(modelContext: modelContext)
-        // Initialize repositories
-        self._tasksRepository = SwiftDataTasksRepository(modelContext: modelContext)
-        self._labelsRepository = SwiftDataLabelsRepository(modelContext: modelContext)
-        self._syncStateStore = SyncStateStore(modelContext: modelContext)
-        self._workingLogRepository = SwiftDataWorkingLogRepository(modelContext: modelContext)
+        DataMigration.runMigrations(modelContext: bootstrapContext)
+        
+        // IMPORTANT: Do not share a single ModelContext across multiple actors.
+        // Create one context per repository actor to avoid concurrent access crashes.
+        let tasksContext = ModelContext(modelContainer)
+        tasksContext.autosaveEnabled = true
+        let labelsContext = ModelContext(modelContainer)
+        labelsContext.autosaveEnabled = true
+        let syncStateContext = ModelContext(modelContainer)
+        syncStateContext.autosaveEnabled = true
+        let workingLogContext = ModelContext(modelContainer)
+        workingLogContext.autosaveEnabled = true
+
+        // Initialize repositories with their own contexts
+        self._tasksRepository = SwiftDataTasksRepository(modelContext: tasksContext)
+        self._labelsRepository = SwiftDataLabelsRepository(modelContext: labelsContext)
+        self._syncStateStore = SyncStateStore(modelContext: syncStateContext)
+        self._workingLogRepository = SwiftDataWorkingLogRepository(modelContext: workingLogContext)
     }
     
     /// Private initializer for test containers
@@ -125,14 +137,21 @@ final class DataContainer {
             throw DataError.initializationFailed("Failed to create ModelContainer: \(error.localizedDescription)")
         }
         
-        let modelContext = ModelContext(modelContainer)
-        modelContext.autosaveEnabled = true
-        // No legacy cleanup in test containers unless specifically needed
+        // Create isolated contexts per repository for tests as well
+        let tasksContext = ModelContext(modelContainer)
+        tasksContext.autosaveEnabled = true
+        let labelsContext = ModelContext(modelContainer)
+        labelsContext.autosaveEnabled = true
+        let syncStateContext = ModelContext(modelContainer)
+        syncStateContext.autosaveEnabled = true
+        let workingLogContext = ModelContext(modelContainer)
+        workingLogContext.autosaveEnabled = true
+        
         // Initialize repositories
-        self._tasksRepository = SwiftDataTasksRepository(modelContext: modelContext)
-        self._labelsRepository = SwiftDataLabelsRepository(modelContext: modelContext)
-        self._syncStateStore = SyncStateStore(modelContext: modelContext)
-        self._workingLogRepository = SwiftDataWorkingLogRepository(modelContext: modelContext)
+        self._tasksRepository = SwiftDataTasksRepository(modelContext: tasksContext)
+        self._labelsRepository = SwiftDataLabelsRepository(modelContext: labelsContext)
+        self._syncStateStore = SyncStateStore(modelContext: syncStateContext)
+        self._workingLogRepository = SwiftDataWorkingLogRepository(modelContext: workingLogContext)
     }
     
     /// Creates a test container with in-memory storage

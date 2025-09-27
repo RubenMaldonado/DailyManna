@@ -37,7 +37,7 @@ struct CompletionCheck: View {
             action()
         } label: {
             Image(systemName: isCompleted ? "checkmark.circle.fill" : "circle")
-                .font(.title2)
+                .font(.system(size: 24, weight: .semibold))
                 .foregroundColor(isCompleted ? Colors.primary : Colors.onSurface.opacity(0.6))
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())

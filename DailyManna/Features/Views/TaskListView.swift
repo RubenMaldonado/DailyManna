@@ -67,6 +67,7 @@ struct TaskListView: View {
         VStack(spacing: 0) {
             syncErrorBanner.typeErased()
             pendingDeleteBanner.typeErased()
+            pendingCompleteForeverBanner.typeErased()
             // Bucket header removed in multi-bucket list mode
             activeFiltersRow.typeErased()
             contentSection.typeErased()
@@ -238,6 +239,16 @@ struct TaskListView: View {
                 }
             }
         }
+        .overlay(alignment: .bottom) {
+            if viewModel.snackbarIsPresented, let msg = viewModel.snackbarMessage {
+                Snackbar(message: msg, actionTitle: "Undo", duration: 4.0, isPresented: $viewModel.snackbarIsPresented) {
+                    _Concurrency.Task { await viewModel.undoLastCompletion() }
+                }
+                .padding(.bottom, 16)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .animation(.easeInOut(duration: 0.2), value: viewModel.snackbarIsPresented)
+            }
+        }
         #if os(macOS)
         // Hidden keyboard shortcuts for rescheduling within This Week
         .overlay(
@@ -304,7 +315,6 @@ struct TaskListView: View {
                         .padding(.horizontal)
                 } else {
                     AllBucketsListView(viewModel: viewModel, userId: userId)
-                        .transaction { $0.disablesAnimations = true }
                 }
                 if workingLogVM.isOpen {
                     Divider()
@@ -380,6 +390,25 @@ private extension TaskListView {
                         Button("Cancel") { viewModel.pendingDelete = nil }
                             .buttonStyle(SecondaryButtonStyle(size: .small))
                         Button("Delete", role: .destructive) { _Concurrency.Task { await viewModel.performDelete() } }
+                            .buttonStyle(PrimaryButtonStyle(size: .small))
+                    }
+                    .padding(.trailing, 24)
+                )
+        }
+    }
+
+    @ViewBuilder
+    var pendingCompleteForeverBanner: some View {
+        if let t = viewModel.pendingCompleteForever {
+            Banner(kind: .warning, message: "Complete Forever - \"\(t.title)\" will stop recurring and be marked complete. This action cannot be undone.")
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .overlay(
+                    HStack(spacing: 8) {
+                        Spacer()
+                        Button("Cancel") { viewModel.pendingCompleteForever = nil }
+                            .buttonStyle(SecondaryButtonStyle(size: .small))
+                        Button("Complete Forever", role: .destructive) { _Concurrency.Task { await viewModel.performCompleteForever() } }
                             .buttonStyle(PrimaryButtonStyle(size: .small))
                     }
                     .padding(.trailing, 24)
@@ -904,7 +933,7 @@ private struct TaskRowView: View {
     @EnvironmentObject private var viewModel: TaskListViewModel
     
     var body: some View {
-        TaskCard(task: task, labels: labels, onToggleCompletion: { onToggle(task) }, subtaskProgress: subtaskProgress, showsRecursIcon: viewModel.tasksWithRecurrence.contains(task.id), onPauseResume: { _Concurrency.Task { await viewModel.pauseResume(taskId: task.id) } }, onSkipNext: { _Concurrency.Task { await viewModel.skipNext(taskId: task.id) } }, onGenerateNow: { _Concurrency.Task { await viewModel.generateNow(taskId: task.id) } })
+        TaskCard(task: task, labels: labels, onToggleCompletion: { onToggle(task) }, subtaskProgress: subtaskProgress, showsRecursIcon: viewModel.tasksWithRecurrence.contains(task.id), onPauseResume: { _Concurrency.Task { await viewModel.pauseResume(taskId: task.id) } }, onSkipNext: { _Concurrency.Task { await viewModel.skipNext(taskId: task.id) } }, onGenerateNow: { _Concurrency.Task { await viewModel.generateNow(taskId: task.id) } }, onCompleteForever: { viewModel.confirmCompleteForever(task) })
             .contextMenu {
                 Button("Edit") { onEdit(task) }
                     #if os(macOS)

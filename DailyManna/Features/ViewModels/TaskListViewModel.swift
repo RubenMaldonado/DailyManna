@@ -25,11 +25,16 @@ final class TaskListViewModel: ObservableObject {
     @Published var isPresentingTaskForm: Bool = false
     @Published var editingTask: Task? = nil
     @Published var pendingDelete: Task? = nil
+    @Published var pendingCompleteForever: Task? = nil
     @Published var isBoardModeActive: Bool = false
     // When true, list mode should fetch across all buckets (explicitly all-buckets)
     @Published var forceAllBuckets: Bool = false
     @Published var syncErrorMessage: String? = nil
     @Published var prefilledDraft: TaskDraft? = nil
+    // Snackbar state for temporary notifications like completion undo
+    @Published var snackbarMessage: String? = nil
+    @Published var snackbarIsPresented: Bool = false
+    private var lastCompletedTaskSnapshot: Task? = nil
     @Published var lastCreatedTaskId: UUID? = nil
     @AppStorage("sortByDueDate") private var sortByDueDate: Bool = false
     // Filtering
@@ -353,8 +358,26 @@ final class TaskListViewModel: ObservableObject {
                 recurringTemplateIdsCache = Set(recs.map { $0.taskTemplateId })
                 recurrenceCacheDirty = false
             }
-            let ids = recurringTemplateIdsCache
-            await MainActor.run { self.tasksWithRecurrence = ids.intersection(taskIds) }
+            
+            // Include both template tasks and their generated instances
+            var recurrenceTaskIds = recurringTemplateIdsCache.intersection(taskIds)
+            
+            // Also include generated instances that have a parent with an active recurrence
+            let deps = Dependencies.shared
+            let taskUseCases = try TaskUseCases(
+                tasksRepository: deps.resolve(type: TasksRepository.self),
+                labelsRepository: deps.resolve(type: LabelsRepository.self)
+            )
+            
+            for taskId in taskIds {
+                if let (task, _) = try? await taskUseCases.fetchTaskWithLabels(by: taskId),
+                   let parentId = task.parentTaskId,
+                   recurringTemplateIdsCache.contains(parentId) {
+                    recurrenceTaskIds.insert(taskId)
+                }
+            }
+            
+            await MainActor.run { self.tasksWithRecurrence = recurrenceTaskIds }
         } catch {
             // non-fatal
         }
@@ -492,6 +515,13 @@ final class TaskListViewModel: ObservableObject {
     func toggleTaskCompletion(task: Task, refreshIn filter: TimeBucket?) async {
         do {
             let wasCompleted = task.isCompleted
+            // Optimistic UI update: reflect new completed state immediately
+            if let idx = tasksWithLabels.firstIndex(where: { $0.0.id == task.id }) {
+                var pair = tasksWithLabels[idx]
+                pair.0.isCompleted.toggle()
+                pair.0.completedAt = pair.0.isCompleted ? Date() : nil
+                tasksWithLabels[idx] = pair
+            }
             if let progress = subtaskProgressByParent[task.id], progress.total > 0 {
                 _ = try await Logger.shared.time("toggleParentCompletionCascade", category: .perf) {
                     try await taskUseCases.toggleParentCompletionCascade(parentId: task.id)
@@ -502,8 +532,8 @@ final class TaskListViewModel: ObservableObject {
                 }
             }
             await refreshCounts()
-            // Small delay to allow completion animation to read before row disappears under filters
-            try? await _Concurrency.Task.sleep(nanoseconds: 200_000_000) // 0.2s
+            // Dwell to allow completion feedback to register before removal
+            try? await _Concurrency.Task.sleep(nanoseconds: 700_000_000) // 0.7s
             await fetchTasks(in: filter, showLoading: false)
             // Notify working log to refresh if open
             NotificationCenter.default.post(name: Notification.Name("dm.task.completed.changed"), object: nil, userInfo: ["taskId": task.id])
@@ -511,9 +541,34 @@ final class TaskListViewModel: ObservableObject {
             if wasCompleted == false {
                 await generateNextInstanceIfRecurring(templateTaskId: task.id)
             }
+            // Present snackbar with Undo when marking complete
+            if wasCompleted == false {
+                await MainActor.run {
+                    self.snackbarMessage = "Task completed"
+                    self.snackbarIsPresented = true
+                    self.lastCompletedTaskSnapshot = task
+                }
+            }
         } catch {
             errorMessage = "Failed to toggle task completion: \(error.localizedDescription)"
             Logger.shared.error("Failed to toggle task completion", category: .ui, error: error)
+        }
+    }
+
+    func undoLastCompletion() async {
+        guard let snapshot = lastCompletedTaskSnapshot else { return }
+        do {
+            _ = try await Logger.shared.time("undoTaskCompletion", category: .perf) {
+                try await taskUseCases.toggleTaskCompletion(id: snapshot.id, userId: userId)
+            }
+            await refreshCounts()
+            await fetchTasks(in: (forceAllBuckets || isBoardModeActive) ? nil : selectedBucket, showLoading: false)
+            await MainActor.run {
+                snackbarIsPresented = false
+                lastCompletedTaskSnapshot = nil
+            }
+        } catch {
+            await MainActor.run { errorMessage = "Failed to undo: \(error.localizedDescription)" }
         }
     }
 
@@ -550,6 +605,55 @@ final class TaskListViewModel: ObservableObject {
             }
         } catch {
             Logger.shared.error("Failed to skip next occurrence", category: .ui, error: error)
+        }
+    }
+
+    func completeForever(taskId: UUID) async {
+        guard let recUC = recurrenceUseCases else { return }
+        do {
+            let deps = Dependencies.shared
+            let taskUseCases = try TaskUseCases(
+                tasksRepository: deps.resolve(type: TasksRepository.self),
+                labelsRepository: deps.resolve(type: LabelsRepository.self)
+            )
+
+            // Resolve the true template ID: if no recurrence exists for the given id,
+            // check whether this task is a generated instance with a parent template.
+            let effectiveTemplateId: UUID
+            if let _ = try? await recUC.getByTaskTemplateId(taskId, userId: userId) {
+                effectiveTemplateId = taskId
+            } else if let (candidate, _) = try? await taskUseCases.fetchTaskWithLabels(by: taskId), let parent = candidate.parentTaskId,
+                      let _ = try? await recUC.getByTaskTemplateId(parent, userId: userId) {
+                effectiveTemplateId = parent
+            } else {
+                // No recurrence found, just complete the task
+                try await taskUseCases.toggleTaskCompletion(id: taskId, userId: userId)
+                await refreshCounts()
+                await fetchTasks(in: (forceAllBuckets || isBoardModeActive) ? nil : selectedBucket, showLoading: false)
+                return
+            }
+
+            // Delete the recurrence permanently
+            try await recUC.delete(id: effectiveTemplateId)
+            Logger.shared.info("Deleted recurrence for template=\(effectiveTemplateId)", category: .ui)
+            
+            // Complete the current task
+            try await taskUseCases.toggleTaskCompletion(id: taskId, userId: userId)
+            Logger.shared.info("Completed task=\(taskId) after stopping recurrence", category: .ui)
+            
+            await refreshCounts()
+            await fetchTasks(in: (forceAllBuckets || isBoardModeActive) ? nil : selectedBucket, showLoading: false)
+            
+            // Show success message
+            await MainActor.run {
+                self.snackbarMessage = "Recurrence stopped and task completed"
+                self.snackbarIsPresented = true
+            }
+        } catch {
+            Logger.shared.error("Failed to complete forever", category: .ui, error: error)
+            await MainActor.run {
+                self.errorMessage = "Failed to complete forever: \(error.localizedDescription)"
+            }
         }
     }
 
@@ -759,6 +863,16 @@ final class TaskListViewModel: ObservableObject {
             errorMessage = "Failed to delete task: \(error.localizedDescription)"
             Logger.shared.error("Failed to delete task", category: .ui, error: error)
         }
+    }
+
+    func confirmCompleteForever(_ task: Task) {
+        pendingCompleteForever = task
+    }
+    
+    func performCompleteForever() async {
+        guard let task = pendingCompleteForever else { return }
+        pendingCompleteForever = nil
+        await completeForever(taskId: task.id)
     }
     
     func move(taskId: UUID, to bucket: TimeBucket) async {

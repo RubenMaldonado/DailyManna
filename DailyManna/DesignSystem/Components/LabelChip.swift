@@ -18,7 +18,9 @@ struct LabelChip: View {
     
     var body: some View {
         // Frosted chip: translucent background with label tint; fallback to solid tint
-        let fg = Contrast.bestBWForeground(forHexBackground: label.color)
+        // Ensure label text is readable in both light and dark modes.
+        // Prefer solid black text in light mode for guaranteed contrast over frosted backgrounds.
+        let fg: Color = (colorScheme == .light) ? .black : Contrast.bestBWForeground(forHexBackground: label.color)
         let base = Text(label.name)
             .style(Typography.caption)
             .padding(.horizontal, Spacing.xxSmall)
@@ -34,7 +36,7 @@ struct LabelChip: View {
         } else {
             base
                 .background(Materials.glassChrome)
-                .overlay(label.uiColor.opacity(0.18).clipShape(RoundedRectangle(cornerRadius: 6)))
+                .overlay(label.uiColor.opacity(0.22).clipShape(RoundedRectangle(cornerRadius: 6)))
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Materials.hairlineColor, lineWidth: 0.5))
                 .foregroundColor(fg)
         }

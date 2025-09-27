@@ -69,6 +69,7 @@ struct AllBucketsListView: View {
                                         onDelete: { task in viewModel.confirmDelete(task) },
                                         coordinateSpaceName: "bucket_\(bucket.rawValue)"
                                     )
+                                    .environmentObject(viewModel)
                                     // Visually nest tasks under the bucket header
                                     .padding(.leading, Spacing.large)
                                     .padding(.trailing, Spacing.medium)

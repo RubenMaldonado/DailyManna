@@ -26,6 +26,7 @@ struct InlineBoardView: View {
                             onPauseResume: { id in _Concurrency.Task { await viewModel.pauseResume(taskId: id) } },
                             onSkipNext: { id in _Concurrency.Task { await viewModel.skipNext(taskId: id) } },
                             onGenerateNow: { id in _Concurrency.Task { await viewModel.generateNow(taskId: id) } },
+                            onCompleteForever: { task in viewModel.confirmCompleteForever(task) },
                             onAdd: {
                                 viewModel.presentCreateForm(bucket: .thisWeek)
                             }
@@ -47,6 +48,7 @@ struct InlineBoardView: View {
                             onPauseResume: { id in _Concurrency.Task { await viewModel.pauseResume(taskId: id) } },
                             onSkipNext: { id in _Concurrency.Task { await viewModel.skipNext(taskId: id) } },
                             onGenerateNow: { id in _Concurrency.Task { await viewModel.generateNow(taskId: id) } },
+                            onCompleteForever: { task in viewModel.confirmCompleteForever(task) },
                             onAdd: {
                                 viewModel.presentCreateForm(bucket: .nextWeek)
                             }
@@ -140,6 +142,7 @@ struct InlineStandardBucketColumn: View {
                             layout: .board,
                             highlighted: (bucket == .thisWeek && pair.0.bucketKey != .thisWeek) || (bucket == .nextWeek && pair.0.bucketKey != .nextWeek),
                             onToggleCompletion: { onToggle(pair.0) },
+                            onOpenEdit: { onEdit(pair.0) },
                             subtaskProgress: subtaskProgressByParent[pair.0.id],
                             showsRecursIcon: tasksWithRecurrence.contains(pair.0.id),
                             onPauseResume: { onPauseResume(pair.0.id) },
@@ -176,7 +179,7 @@ struct InlineStandardBucketColumn: View {
                             Button("Edit") { onEdit(pair.0) }
                             Button(role: .destructive) { onDelete(pair.0) } label: { Text("Delete") }
                         }
-                        .onTapGesture(count: 2) { onEdit(pair.0) }
+                        // Single-tap edit is handled inside TaskCard via onOpenEdit
                         .draggable(DraggableTaskID(id: pair.0.id))
                         .background(GeometryReader { proxy in
                             Color.clear.preference(key: BoardRowFramePreferenceKey.self, value: [pair.0.id: proxy.frame(in: .named("columnDrop"))])
@@ -258,6 +261,7 @@ struct InlineThisWeekColumn: View {
     let onPauseResume: (UUID) -> Void
     let onSkipNext: (UUID) -> Void
     let onGenerateNow: (UUID) -> Void
+    let onCompleteForever: (Task) -> Void
     let onAdd: () -> Void
 
     private var sections: [WeekdaySection] { WeekPlanner.buildSections(for: Date()) }
@@ -379,6 +383,7 @@ struct InlineThisWeekColumn: View {
                             labels: pair.1,
                             layout: .board,
                             onToggleCompletion: { onToggle(pair.0) },
+                            onOpenEdit: { onEdit(pair.0) },
                             subtaskProgress: subtaskProgressByParent[pair.0.id],
                             showsRecursIcon: tasksWithRecurrence.contains(pair.0.id),
                             onPauseResume: { onPauseResume(pair.0.id) },
@@ -395,7 +400,7 @@ struct InlineThisWeekColumn: View {
                             Button("Edit") { onEdit(pair.0) }
                             Button(role: .destructive) { onDelete(pair.0) } label: { Text("Delete") }
                         }
-                        .onTapGesture(count: 2) { onEdit(pair.0) }
+                        // Single-tap edit is handled inside TaskCard via onOpenEdit
                         .draggable(DraggableTaskID(id: pair.0.id))
                         .padding(.horizontal, Spacing.xSmall)
                     }
@@ -416,11 +421,13 @@ struct InlineThisWeekColumn: View {
             labels: pair.1,
             layout: .board,
             onToggleCompletion: { onToggle(pair.0) },
+            onOpenEdit: { onEdit(pair.0) },
             subtaskProgress: subtaskProgressByParent[pair.0.id],
             showsRecursIcon: tasksWithRecurrence.contains(pair.0.id),
             onPauseResume: { onPauseResume(pair.0.id) },
             onSkipNext: { onSkipNext(pair.0.id) },
-            onGenerateNow: { onGenerateNow(pair.0.id) }
+            onGenerateNow: { onGenerateNow(pair.0.id) },
+            onCompleteForever: { onCompleteForever(pair.0) }
         )
         .contextMenu {
             if section.isToday == false { Button("Schedule Today") { Telemetry.record(.taskRescheduledQuickAction, metadata: ["to_day": "Today"]) ; schedule(pair.0.id, Date()) } }
@@ -436,7 +443,7 @@ struct InlineThisWeekColumn: View {
             Button("Edit") { onEdit(pair.0) }
             Button(role: .destructive) { onDelete(pair.0) } label: { Text("Delete") }
         }
-        .onTapGesture(count: 2) { onEdit(pair.0) }
+        // Single-tap edit is handled inside TaskCard via onOpenEdit
         .draggable(DraggableTaskID(id: pair.0.id))
         .padding(.horizontal, Spacing.xSmall)
     }
@@ -458,6 +465,7 @@ struct InlineNextWeekColumn: View {
     let onPauseResume: (UUID) -> Void
     let onSkipNext: (UUID) -> Void
     let onGenerateNow: (UUID) -> Void
+    let onCompleteForever: (Task) -> Void
     let onAdd: () -> Void
 
     private var sections: [WeekdaySection] { WeekPlanner.buildNextWeekSections(for: Date()) }
@@ -532,7 +540,8 @@ struct InlineNextWeekColumn: View {
             showsRecursIcon: tasksWithRecurrence.contains(pair.0.id),
             onPauseResume: { onPauseResume(pair.0.id) },
             onSkipNext: { onSkipNext(pair.0.id) },
-            onGenerateNow: { onGenerateNow(pair.0.id) }
+            onGenerateNow: { onGenerateNow(pair.0.id) },
+            onCompleteForever: { onCompleteForever(pair.0) }
         )
         .contextMenu {
             Menu("Schedule") {

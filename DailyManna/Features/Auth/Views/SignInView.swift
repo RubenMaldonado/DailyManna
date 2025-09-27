@@ -25,27 +25,23 @@ struct SignInView: View {
     }
     
     var body: some View {
-        VStack(spacing: 32) {
+        VStack(spacing: Spacing.xLarge) {
             // App Logo and Title
-            VStack(spacing: 16) {
-                Image(systemName: "list.bullet.clipboard")
-                    .font(.system(size: 60))
-                    .foregroundColor(Colors.primary)
-                
+            VStack(spacing: Spacing.medium) {
+                AppIdentityMark()
                 Text("Daily Manna")
-                    .font(Typography.largeTitle)
+                    .style(Typography.largeTitle)
                     .foregroundColor(Colors.onBackground)
-                
                 Text("Structure Your Week, Focus Your Mind")
-                    .font(Typography.body)
+                    .style(Typography.body)
                     .foregroundColor(Colors.onSurface)
                     .multilineTextAlignment(.center)
             }
-            
-            Spacer()
-            
+
+            Spacer(minLength: 0)
+
             // Authentication Buttons
-            VStack(spacing: 16) {
+            VStack(spacing: Spacing.medium) {
                 SignInWithAppleButton(.signIn) { request in
                     // Generate nonce pair and attach hashed to the request
                     let pair = authService.prepareAppleNonce()
@@ -62,20 +58,13 @@ struct SignInView: View {
                 .cornerRadius(8)
                 
                 Button(action: handleGoogleSignIn) {
-                    HStack {
+                    HStack(spacing: Spacing.small) {
                         Image(systemName: "globe")
                         Text("Continue with Google")
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: 50)
-                    .background(Colors.surface)
-                    .foregroundColor(Colors.onSurface)
-                    .cornerRadius(8)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Colors.outline, lineWidth: 1)
-                    )
                 }
+                .buttonStyle(SecondaryButtonStyle())
                 .disabled(isLoading)
             }
             
@@ -86,24 +75,21 @@ struct SignInView: View {
             }
             
             if let errorMessage = errorMessage {
-                Text(errorMessage)
-                    .font(Typography.caption)
-                    .foregroundColor(Colors.error)
-                    .multilineTextAlignment(.center)
-                    .padding(.top)
+                Banner(kind: .error, message: errorMessage)
+                    .padding(.top, Spacing.small)
             }
             
-            Spacer()
+            Spacer(minLength: 0)
             
             // Privacy Notice
             Text("By signing in, you agree to our privacy policy and terms of service.")
-                .font(Typography.caption)
+                .style(Typography.caption)
                 .foregroundColor(Colors.onSurface)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
         }
-        .padding(24)
-        .background(Colors.background)
+        .padding(Spacing.xLarge)
+        .surfaceStyle(.background)
     }
     
     private func handleAppleSignIn(_ result: Result<ASAuthorization, Error>) {
@@ -149,6 +135,40 @@ struct SignInView: View {
     }
 }
 
-#Preview {
+// MARK: - App Identity Mark
+private struct AppIdentityMark: View {
+    var body: some View {
+        Group {
+            #if os(macOS)
+            if let appIcon = NSImage(named: NSImage.applicationIconName) {
+                Image(nsImage: appIcon)
+                    .resizable()
+                    .interpolation(.high)
+                    .antialiased(true)
+                    .frame(width: 84, height: 84)
+                    .cornerRadius(16)
+                    .shadow(radius: 6)
+            } else {
+                Image(systemName: "list.bullet.clipboard")
+                    .font(.system(size: 60))
+                    .foregroundColor(Colors.primary)
+            }
+            #else
+            Image(systemName: "list.bullet.clipboard")
+                .font(.system(size: 60))
+                .foregroundColor(Colors.primary)
+            #endif
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+#Preview("iOS Light") {
     SignInView()
+        .preferredColorScheme(.light)
+}
+
+#Preview("macOS Dark") {
+    SignInView()
+        .preferredColorScheme(.dark)
 }

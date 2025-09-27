@@ -37,6 +37,21 @@ struct BucketBoardView: View {
                         )
                         .padding(.bottom, Spacing.small)
                 }
+                if let t = viewModel.pendingCompleteForever {
+                    Banner(kind: .warning, message: "Complete Forever - \"\(t.title)\" will stop recurring and be marked complete. This action cannot be undone.")
+                        .frame(maxWidth: .infinity)
+                        .overlay(
+                            HStack(spacing: 8) {
+                                Spacer()
+                                Button("Cancel") { viewModel.pendingCompleteForever = nil }
+                                    .buttonStyle(SecondaryButtonStyle(size: .small))
+                                Button("Complete Forever", role: .destructive) { _Concurrency.Task { await viewModel.performCompleteForever() } }
+                                    .buttonStyle(PrimaryButtonStyle(size: .small))
+                            }
+                            .padding(.trailing, 24)
+                        )
+                        .padding(.bottom, Spacing.small)
+                }
                 ForEach(TimeBucket.allCases.sorted { $0.sortOrder < $1.sortOrder }) { bucket in
                     BucketColumn(
                         bucket: bucket,
