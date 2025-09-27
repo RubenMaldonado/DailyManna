@@ -73,8 +73,10 @@ public enum WeekPlanner {
         let cal = calendar
         let startToday = cal.startOfDay(for: today)
         let friday = fridayOfCurrentWeek(for: startToday, calendar: cal)
+        // If today is Saturday/Sunday, clamp to Friday so we still render the week
+        let anchor = (startToday > friday) ? friday : startToday
         var dates: [Date] = []
-        var cursor = startToday
+        var cursor = anchor
         while cursor <= friday {
             let weekday = cal.component(.weekday, from: cursor)
             // Monday=2...Friday=6 when firstWeekday=1 (system default). Using standard Apple mapping where Sunday=1
@@ -89,9 +91,12 @@ public enum WeekPlanner {
     public static func buildSections(for today: Date = Date(), calendar: Calendar = .current, dateFormatter: DateFormatter = WeekPlanner.headerDateFormatter) -> [WeekdaySection] {
         let cal = calendar
         let todayStart = cal.startOfDay(for: today)
-        let dates = remainingWeekdays(from: todayStart, calendar: cal)
+        let friday = fridayOfCurrentWeek(for: todayStart, calendar: cal)
+        // Treat Friday as the effective "today" on weekend, so sections still render and "Today" semantics work
+        let anchor = (todayStart > friday) ? friday : todayStart
+        let dates = remainingWeekdays(from: anchor, calendar: cal)
         return dates.map { date in
-            let isToday = (date == todayStart)
+            let isToday = (date == anchor)
             let title = isToday ? "Today" : dateFormatter.string(from: date)
             return WeekdaySection(id: isoDayKey(for: date, calendar: cal), date: date, title: title, isToday: isToday)
         }
