@@ -11,18 +11,7 @@ struct MacToolbarHost: View {
     var body: some View {
         TaskListView(viewModel: viewModel, userId: userId)
             .toolbar {
-                // View switcher
-                if featureBoardOnly == false {
-                    ToolbarItem(placement: .automatic) {
-                        Picker("View", selection: $viewModeStore.mode) {
-                            Image(systemName: "list.bullet").tag(TaskListView.ViewMode.list)
-                            Image(systemName: "rectangle.grid.2x2").tag(TaskListView.ViewMode.board)
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 140)
-                        .accessibilityIdentifier("toolbar.viewMode")
-                    }
-                }
+                // View switcher removed in board-only mode
                 // Leading status
                 ToolbarItem(placement: .status) {
                     SyncStatusView(isSyncing: viewModel.isSyncing)

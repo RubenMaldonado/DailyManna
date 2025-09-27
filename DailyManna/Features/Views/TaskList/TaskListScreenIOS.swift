@@ -13,7 +13,7 @@ struct TaskListScreenIOS: View {
     @State private var showSettings: Bool = false
     @State private var allLabels: [Label] = []
     @State private var savedFilters: [SavedFilter] = []
-    @State private var viewMode: TaskListView.ViewMode = .list
+    @State private var viewMode: TaskListView.ViewMode = .board
     @State private var lastFilterOpenAt: TimeInterval = 0
     @AppStorage("feature.boardOnly") private var featureBoardOnly: Bool = false
 
@@ -120,15 +120,10 @@ struct TaskListScreenIOS: View {
             Banner(kind: .error, message: error)
                 .padding(.horizontal)
         } else {
-            if featureBoardOnly || viewMode == .board {
-                if hSizeClass == .compact {
-                    BoardPagerIOS(viewModel: viewModel, userId: userId)
-                } else {
-                    BoardColumnsIOSView(viewModel: viewModel, userId: userId)
-                }
+            if hSizeClass == .compact {
+                BoardPagerIOS(viewModel: viewModel, userId: userId)
             } else {
-                AllBucketsListView(viewModel: viewModel, userId: userId)
-                    .transaction { $0.disablesAnimations = true }
+                BoardColumnsIOSView(viewModel: viewModel, userId: userId)
             }
         }
     }
@@ -142,17 +137,7 @@ struct TaskListScreenIOS: View {
         ToolbarItem(placement: .topBarTrailing) {
             if hSizeClass == .regular {
                 HStack(spacing: 8) {
-                    // View switcher (List | Board)
-                    if featureBoardOnly == false {
-                        HStack(spacing: 8) {
-                            Button { viewMode = .list } label: { Image(systemName: "list.bullet") }
-                                .buttonStyle(viewMode == .list ? AnyButtonStyle(PrimaryButtonStyle(size: .small)) : AnyButtonStyle(SecondaryButtonStyle(size: .small)))
-                                .keyboardShortcut("1", modifiers: .command)
-                            Button { viewMode = .board } label: { Image(systemName: "rectangle.grid.2x2") }
-                                .buttonStyle(viewMode == .board ? AnyButtonStyle(PrimaryButtonStyle(size: .small)) : AnyButtonStyle(SecondaryButtonStyle(size: .small)))
-                                .keyboardShortcut("2", modifiers: .command)
-                        }
-                    }
+                    // View switcher removed in board-only mode
                     // Filter button with active count
                     Button(action: {
                         Logger.shared.info("Open filter sheet", category: .ui)
@@ -176,13 +161,7 @@ struct TaskListScreenIOS: View {
                     .buttonStyle(PrimaryButtonStyle(size: .small))
                     // Overflow menu
                     Menu {
-                        // View submenu
-                        if featureBoardOnly == false {
-                            Menu("View") {
-                                Button(action: { viewMode = .list }) { SwiftUI.Label("List", systemImage: "list.bullet"); if viewMode == .list { Image(systemName: "checkmark") } }
-                                Button(action: { viewMode = .board }) { SwiftUI.Label("Board", systemImage: "rectangle.grid.2x2"); if viewMode == .board { Image(systemName: "checkmark") } }
-                            }
-                        }
+                        // View submenu removed in board-only mode
                         Divider()
                         Button("Sync now") { _Concurrency.Task { await viewModel.sync() } }
                         Button("Settings") { showSettings = true }
@@ -204,12 +183,7 @@ struct TaskListScreenIOS: View {
                             lastFilterOpenAt = now
                             if showFilterSheet == false { DispatchQueue.main.async { showFilterSheet = true } }
                         }
-                        if featureBoardOnly == false {
-                            Menu("View") {
-                                Button(action: { viewMode = .list }) { SwiftUI.Label("List", systemImage: "list.bullet"); if viewMode == .list { Image(systemName: "checkmark") } }
-                                Button(action: { viewMode = .board }) { SwiftUI.Label("Board", systemImage: "rectangle.grid.2x2"); if viewMode == .board { Image(systemName: "checkmark") } }
-                            }
-                        }
+                        // View submenu removed in board-only mode
                         Button(viewModel.showCompleted ? "Hide Completed" : "Show Completed") { viewModel.showCompleted.toggle(); _Concurrency.Task { await viewModel.fetchTasks(in: nil) } }
                         Divider()
                         Button("Sync now") { _Concurrency.Task { await viewModel.sync() } }

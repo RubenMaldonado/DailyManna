@@ -21,7 +21,7 @@ struct TaskListView: View {
     @State private var allLabels: [Label] = []
     @State private var savedFilters: [SavedFilter] = []
     @State private var showSettings: Bool = false
-    @State private var viewMode: ViewMode = .list
+    @State private var viewMode: ViewMode = .board
     enum ViewMode: String, CaseIterable, Identifiable { case list = "List", board = "Board"; var id: String { rawValue } }
     @Environment(\.scenePhase) private var scenePhase
     // Throttle to avoid re-entrant toolbar updates when opening filter
@@ -50,13 +50,7 @@ struct TaskListView: View {
     }
 
     // Cross-platform view mode accessor: macOS reads from toolbar store; iOS uses local state
-    private var currentViewMode: ViewMode {
-        #if os(macOS)
-        return featureBoardOnly ? .board : viewModeStore.mode
-        #else
-        return featureBoardOnly ? .board : viewMode
-        #endif
-    }
+    private var currentViewMode: ViewMode { .board }
     
     var body: some View {
         #if os(iOS)

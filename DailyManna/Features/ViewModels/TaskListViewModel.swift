@@ -26,9 +26,9 @@ final class TaskListViewModel: ObservableObject {
     @Published var editingTask: Task? = nil
     @Published var pendingDelete: Task? = nil
     @Published var pendingCompleteForever: Task? = nil
-    @Published var isBoardModeActive: Bool = false
-    // When true, list mode should fetch across all buckets (explicitly all-buckets)
-    @Published var forceAllBuckets: Bool = false
+    // Board-only: always treat fetches as all-buckets (nil filter)
+    @Published var isBoardModeActive: Bool = true
+    @Published var forceAllBuckets: Bool = true
     @Published var syncErrorMessage: String? = nil
     @Published var prefilledDraft: TaskDraft? = nil
     // Snackbar state for temporary notifications like completion undo
@@ -139,8 +139,7 @@ final class TaskListViewModel: ObservableObject {
                     self.recurrenceCacheDirty = true
                     _Concurrency.Task {
                         await self.refreshCounts()
-                        let filter: TimeBucket? = (self.forceAllBuckets || self.isBoardModeActive) ? nil : self.selectedBucket
-                        await self.fetchTasks(in: filter, showLoading: false)
+                        await self.fetchTasks(in: nil, showLoading: false)
                     }
                 }
                 .store(in: &cancellables)
@@ -221,10 +220,7 @@ final class TaskListViewModel: ObservableObject {
         // Keep sync view context aligned with current UI
         // If an explicit bucket is provided, honor it (including nil = all buckets)
         // Otherwise, default to selectedBucket unless an all-buckets mode is active (board)
-        let effectiveBucket: TimeBucket? = {
-            if let explicit = bucket { return explicit }
-            return (forceAllBuckets || isBoardModeActive) ? nil : selectedBucket
-        }()
+        let effectiveBucket: TimeBucket? = nil
         let bucketKey = effectiveBucket?.rawValue
         let dueBy = availableOnly ? availableCutoffEndOfToday() : nil
         syncService?.setViewContext(bucketKey: bucketKey, dueBy: dueBy)
@@ -303,13 +299,8 @@ final class TaskListViewModel: ObservableObject {
             }()
             Logger.shared.debug("renderBatch tasks=\(pairs.count) distinctLabels=\(distinctLabelCount)", category: .perf)
             #endif
-            // Commit result; when in all-buckets list (forceAllBuckets) avoid clearing to empty first
-            if self.forceAllBuckets || self.isBoardModeActive {
-                // Replace in place to minimize flicker
-                self.tasksWithLabels = pairs
-            } else {
-                self.tasksWithLabels = pairs
-            }
+            // Board-only: replace in place to minimize flicker
+            self.tasksWithLabels = pairs
             await loadRecurrenceFlags(for: pairs.map { $0.0.id })
             // Load subtask progress for visible items incrementally
             let parentIds = pairs.map { $0.0.id }
@@ -325,7 +316,7 @@ final class TaskListViewModel: ObservableObject {
         fetchInFlight = false
         if fetchQueued {
             fetchQueued = false
-            await fetchTasks(in: isBoardModeActive ? nil : selectedBucket, showLoading: false)
+            await fetchTasks(in: nil, showLoading: false)
         }
     }
 
@@ -390,8 +381,7 @@ final class TaskListViewModel: ObservableObject {
         self.unlabeledOnly = false
         persistFilterIds()
         _Concurrency.Task {
-            let param: TimeBucket? = (self.forceAllBuckets || self.isBoardModeActive) ? nil : self.selectedBucket
-            await self.fetchTasks(in: param, showLoading: false)
+            await self.fetchTasks(in: nil, showLoading: false)
         }
     }
 
@@ -400,8 +390,7 @@ final class TaskListViewModel: ObservableObject {
         self.matchAll = false
         self.unlabeledOnly = true
         _Concurrency.Task {
-            let param: TimeBucket? = (self.forceAllBuckets || self.isBoardModeActive) ? nil : self.selectedBucket
-            await self.fetchTasks(in: param, showLoading: false)
+            await self.fetchTasks(in: nil, showLoading: false)
         }
     }
 
@@ -409,8 +398,7 @@ final class TaskListViewModel: ObservableObject {
         guard self.availableOnly != enabled else { return }
         self.availableOnly = enabled
         _Concurrency.Task {
-            let param: TimeBucket? = (self.forceAllBuckets || self.isBoardModeActive) ? nil : self.selectedBucket
-            await self.fetchTasks(in: param, showLoading: false)
+            await self.fetchTasks(in: nil, showLoading: false)
         }
     }
 
@@ -439,8 +427,7 @@ final class TaskListViewModel: ObservableObject {
         unlabeledOnly = false
         availableOnly = false
         _Concurrency.Task {
-            let param: TimeBucket? = (self.forceAllBuckets || self.isBoardModeActive) ? nil : self.selectedBucket
-            await self.fetchTasks(in: param, showLoading: false)
+            await self.fetchTasks(in: nil, showLoading: false)
         }
         persistFilterIds()
         if featureThisWeekSectionsEnabled { deriveThisWeekSectionsAndGroups() }
@@ -508,8 +495,7 @@ final class TaskListViewModel: ObservableObject {
     }
     
     func toggleTaskCompletion(task: Task) async {
-        let filter: TimeBucket? = (forceAllBuckets || isBoardModeActive) ? nil : selectedBucket
-        await toggleTaskCompletion(task: task, refreshIn: filter)
+        await toggleTaskCompletion(task: task, refreshIn: nil)
     }
 
     func toggleTaskCompletion(task: Task, refreshIn filter: TimeBucket?) async {
@@ -562,7 +548,7 @@ final class TaskListViewModel: ObservableObject {
                 try await taskUseCases.toggleTaskCompletion(id: snapshot.id, userId: userId)
             }
             await refreshCounts()
-            await fetchTasks(in: (forceAllBuckets || isBoardModeActive) ? nil : selectedBucket, showLoading: false)
+            await fetchTasks(in: nil, showLoading: false)
             await MainActor.run {
                 snackbarIsPresented = false
                 lastCompletedTaskSnapshot = nil
@@ -584,8 +570,7 @@ final class TaskListViewModel: ObservableObject {
                 rec.status = (rec.status == "active") ? "paused" : "active"
                 Logger.shared.info("Toggle recurrence status for template=\(taskId) -> \(rec.status)", category: .ui)
                 try await recUC.update(rec)
-                let filter: TimeBucket? = (forceAllBuckets || isBoardModeActive) ? nil : selectedBucket
-                await fetchTasks(in: filter)
+                await fetchTasks(in: nil)
             }
         } catch {
             Logger.shared.error("Failed to pause/resume recurrence", category: .ui, error: error)
@@ -629,7 +614,7 @@ final class TaskListViewModel: ObservableObject {
                 // No recurrence found, just complete the task
                 try await taskUseCases.toggleTaskCompletion(id: taskId, userId: userId)
                 await refreshCounts()
-                await fetchTasks(in: (forceAllBuckets || isBoardModeActive) ? nil : selectedBucket, showLoading: false)
+                await fetchTasks(in: nil, showLoading: false)
                 return
             }
 
@@ -642,7 +627,7 @@ final class TaskListViewModel: ObservableObject {
             Logger.shared.info("Completed task=\(taskId) after stopping recurrence", category: .ui)
             
             await refreshCounts()
-            await fetchTasks(in: (forceAllBuckets || isBoardModeActive) ? nil : selectedBucket, showLoading: false)
+            await fetchTasks(in: nil, showLoading: false)
             
             // Show success message
             await MainActor.run {
@@ -701,7 +686,7 @@ final class TaskListViewModel: ObservableObject {
             let ids = Set(labels.map { $0.id })
             try await taskUseCases.setLabels(for: newTask.id, to: ids, userId: userId)
             await refreshCounts()
-            await fetchTasks(in: isBoardModeActive ? nil : selectedBucket, showLoading: false)
+            await fetchTasks(in: nil, showLoading: false)
         } catch {
             Logger.shared.error("Failed to generate next instance", category: .ui, error: error)
         }
@@ -794,7 +779,7 @@ final class TaskListViewModel: ObservableObject {
                 }
             }
             await refreshCounts()
-            await fetchTasks(in: isBoardModeActive ? nil : selectedBucket)
+            await fetchTasks(in: nil)
             prefilledDraft = nil
         } catch {
             errorMessage = "Failed to save task: \(error.localizedDescription)"
@@ -877,8 +862,7 @@ final class TaskListViewModel: ObservableObject {
     
     func move(taskId: UUID, to bucket: TimeBucket) async {
         // Respect all-buckets mode when refreshing
-        let filter: TimeBucket? = (forceAllBuckets || isBoardModeActive) ? nil : selectedBucket
-        await move(taskId: taskId, to: bucket, refreshIn: filter)
+        await move(taskId: taskId, to: bucket, refreshIn: nil)
     }
 
     /// Move task and refresh using a specific filter. Pass `nil` to refresh all buckets (board view).
@@ -900,8 +884,7 @@ final class TaskListViewModel: ObservableObject {
         do {
             try await taskUseCases.createTask(newTask)
             await refreshCounts()
-            let filter: TimeBucket? = (forceAllBuckets || isBoardModeActive) ? nil : selectedBucket
-            await fetchTasks(in: filter, showLoading: false)
+            await fetchTasks(in: nil, showLoading: false)
         } catch {
             errorMessage = "Failed to add task: \(error.localizedDescription)"
             Logger.shared.error("Failed to add task", category: .ui, error: error)
@@ -912,8 +895,7 @@ final class TaskListViewModel: ObservableObject {
         do {
             try await taskUseCases.deleteTask(by: task.id, for: userId)
             await refreshCounts()
-            let filter: TimeBucket? = (forceAllBuckets || isBoardModeActive) ? nil : selectedBucket
-            await fetchTasks(in: filter)
+            await fetchTasks(in: nil)
         } catch {
             errorMessage = "Failed to delete task: \(error.localizedDescription)"
             Logger.shared.error("Failed to delete task", category: .ui, error: error)
@@ -1011,8 +993,7 @@ final class TaskListViewModel: ObservableObject {
         await syncService.sync(for: userId)
         // Refresh tasks after sync
         await refreshCounts()
-        let filter: TimeBucket? = (forceAllBuckets || isBoardModeActive) ? nil : selectedBucket
-        await fetchTasks(in: filter)
+        await fetchTasks(in: nil)
     }
     
     func startPeriodicSync() {
@@ -1128,7 +1109,7 @@ final class TaskListViewModel: ObservableObject {
         }
         do {
             try await taskUseCases.updateTask(task)
-            await fetchTasks(in: isBoardModeActive ? nil : selectedBucket, showLoading: false)
+            await fetchTasks(in: nil, showLoading: false)
         } catch {
             errorMessage = "Failed to reschedule: \(error.localizedDescription)"
         }
@@ -1143,7 +1124,7 @@ final class TaskListViewModel: ObservableObject {
         do {
             try await taskUseCases.updateTask(task)
             await NotificationsManager.cancelDueNotification(taskId: task.id)
-            await fetchTasks(in: isBoardModeActive ? nil : selectedBucket, showLoading: false)
+            await fetchTasks(in: nil, showLoading: false)
         } catch {
             errorMessage = "Failed to clear due date: \(error.localizedDescription)"
         }
