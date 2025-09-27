@@ -83,6 +83,12 @@ final class SyncService: ObservableObject {
         
         do {
             Logger.shared.info("Starting sync operation", category: .sync)
+
+            // Weekend rollover first so moves are included in the same push
+            let didRolloverEarly = await WeeklyRolloverService().performIfNeeded(userId: userId)
+            if didRolloverEarly {
+                Logger.shared.info("Weekly rollover performed before push; including moves in this sync", category: .sync)
+            }
             
             // Sync tasks
             try await withRetry { [weak self] in
