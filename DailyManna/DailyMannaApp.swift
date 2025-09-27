@@ -25,6 +25,10 @@ struct DailyMannaApp: App {
         #if os(iOS)
         BackgroundSync.register()
         #endif
+        // Feature flags defaults
+        UserDefaults.standard.register(defaults: [
+            "feature.boardOnly": true // Enable board-only UI by default (easy rollback via AppStorage)
+        ])
         
         do {
             let service = try Dependencies.shared.resolve(type: AuthenticationService.self)
