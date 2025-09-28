@@ -2,11 +2,30 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 #if os(macOS)
-private enum BoardMetrics { static let columnWidth: CGFloat = 480 }
+private enum BoardMetrics {
+    static func columnWidth(for containerWidth: CGFloat) -> CGFloat {
+        let minW: CGFloat = 360
+        let maxW: CGFloat = 560
+        let targetCols: CGFloat = {
+            switch containerWidth {
+            case ..<1024: return 3
+            case 1024..<1440: return 4
+            case 1440..<1920: return 5
+            default: return 6
+            }
+        }()
+        let gutter: CGFloat = 16
+        let gutters = max(0, targetCols - 1) * gutter
+        let ideal = floor((containerWidth - gutters - 32) / targetCols)
+        return min(maxW, max(minW, ideal))
+    }
+}
 struct InlineBoardView: View {
     @ObservedObject var viewModel: TaskListViewModel
     private var buckets: [TimeBucket] { TimeBucket.allCases.sorted { $0.sortOrder < $1.sortOrder } }
     var body: some View {
+        GeometryReader { geo in
+        let colWidth = BoardMetrics.columnWidth(for: geo.size.width)
         ScrollView(.horizontal) {
             HStack(spacing: Spacing.medium) {
                 ForEach(buckets, id: \.rawValue) { (bucket: TimeBucket) in
@@ -103,6 +122,7 @@ struct InlineBoardView: View {
             .transaction { txn in txn.disablesAnimations = true }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
     }
 }
 
@@ -203,7 +223,7 @@ struct InlineStandardBucketColumn: View {
         .surfaceStyle(.content)
         .cornerRadius(12)
         .coordinateSpace(name: "columnDrop")
-        .frame(width: BoardMetrics.columnWidth)
+        .frame(width: colWidth)
         .onDrop(of: [UTType.plainText], delegate: InlineColumnDropDelegate(
             tasksWithLabels: tasksWithLabels,
             rowFramesProvider: { rowFrames },

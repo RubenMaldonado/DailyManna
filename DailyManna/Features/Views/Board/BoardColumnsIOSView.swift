@@ -5,10 +5,27 @@ struct BoardColumnsIOSView: View {
     @ObservedObject var viewModel: TaskListViewModel
     let userId: UUID
     @Environment(\.horizontalSizeClass) private var hSizeClass
-    private let columnWidth: CGFloat = 480
+    private func columnWidth(_ containerWidth: CGFloat) -> CGFloat {
+        let minW: CGFloat = 360
+        let maxW: CGFloat = 560
+        let targetCols: CGFloat = {
+            switch containerWidth {
+            case ..<1024: return 3
+            case 1024..<1440: return 4
+            case 1440..<1920: return 5
+            default: return 6
+            }
+        }()
+        let gutter: CGFloat = 16
+        let gutters = max(0, targetCols - 1) * gutter
+        let ideal = floor((containerWidth - gutters - 32) / targetCols)
+        return min(maxW, max(minW, ideal))
+    }
 
     var body: some View {
         if hSizeClass == .regular {
+            GeometryReader { geo in
+            let colW = columnWidth(geo.size.width)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: Spacing.medium) {
                     // This Week
@@ -22,13 +39,13 @@ struct BoardColumnsIOSView: View {
                         )
                         .frame(maxHeight: .infinity, alignment: .top)
                     }
-                    .frame(width: columnWidth)
+                    .frame(width: colW)
                     .surfaceStyle(.content)
                     .cornerRadius(12)
 
                     // Weekend
                     StandardBucketColumn(viewModel: viewModel, bucket: .weekend)
-                        .frame(width: columnWidth)
+                        .frame(width: colW)
 
                     // Next Week
                     VStack(alignment: .leading, spacing: Spacing.xSmall) {
@@ -41,21 +58,22 @@ struct BoardColumnsIOSView: View {
                         )
                         .frame(maxHeight: .infinity, alignment: .top)
                     }
-                    .frame(width: columnWidth)
+                    .frame(width: colW)
                     .surfaceStyle(.content)
                     .cornerRadius(12)
 
                     // Next Month
                     StandardBucketColumn(viewModel: viewModel, bucket: .nextMonth)
-                        .frame(width: columnWidth)
+                        .frame(width: colW)
 
                     // Routines
                     StandardBucketColumn(viewModel: viewModel, bucket: .routines)
-                        .frame(width: columnWidth)
+                        .frame(width: colW)
                 }
                 .padding()
             }
             .background(Colors.background)
+            }
         } else {
             BoardPagerIOS(viewModel: viewModel, userId: userId)
         }
