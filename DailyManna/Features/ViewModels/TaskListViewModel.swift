@@ -110,6 +110,11 @@ final class TaskListViewModel: ObservableObject {
                 self.pendingRecurrenceSelections[taskId] = rule
             }
         }
+        NotificationCenter.default.addObserver(forName: Notification.Name("dm.taskform.recurrence.clear"), object: nil, queue: nil) { [weak self] note in
+            guard let self else { return }
+            guard let taskId = note.userInfo?["taskId"] as? UUID else { return }
+            _Concurrency.Task { await self.clearRecurrenceIfExists(taskId: taskId) }
+        }
         
         // Start observing sync state if available (Combine to avoid Task name clash)
         if let syncService = syncService {
@@ -1127,6 +1132,37 @@ final class TaskListViewModel: ObservableObject {
             await fetchTasks(in: nil, showLoading: false)
         } catch {
             errorMessage = "Failed to clear due date: \(error.localizedDescription)"
+        }
+    }
+
+    /// Deletes recurrence row if it exists for a given template (or parent template if id is an instance)
+    private func clearRecurrenceIfExists(taskId: UUID) async {
+        guard let recUC = recurrenceUseCases else { return }
+        do {
+            let deps = Dependencies.shared
+            let taskUseCases = try TaskUseCases(
+                tasksRepository: deps.resolve(type: TasksRepository.self),
+                labelsRepository: deps.resolve(type: LabelsRepository.self)
+            )
+            // Determine template id
+            let effectiveTemplateId: UUID
+            if let _ = try? await recUC.getByTaskTemplateId(taskId, userId: userId) {
+                effectiveTemplateId = taskId
+            } else if let (candidate, _) = try? await taskUseCases.fetchTaskWithLabels(by: taskId), let parent = candidate.parentTaskId,
+                      let _ = try? await recUC.getByTaskTemplateId(parent, userId: userId) {
+                effectiveTemplateId = parent
+            } else {
+                return
+            }
+            // Delete recurrence
+            try await recUC.delete(id: effectiveTemplateId)
+            Logger.shared.info("Cleared recurrence for template=\(effectiveTemplateId)", category: .ui)
+            // Refresh flags and tasks
+            await MainActor.run { self.recurrenceCacheDirty = true }
+            await refreshCounts()
+            await fetchTasks(in: nil, showLoading: false)
+        } catch {
+            Logger.shared.error("Failed to clear recurrence", category: .ui, error: error)
         }
     }
 }

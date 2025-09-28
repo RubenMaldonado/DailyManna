@@ -331,6 +331,11 @@ private extension TaskFormView {
                 "taskId": draft.id,
                 "ruleJSON": data
             ])
+        } else if isEditing {
+            // Explicitly clear any existing recurrence when the chip is cleared during edit
+            NotificationCenter.default.post(name: Notification.Name("dm.taskform.recurrence.clear"), object: nil, userInfo: [
+                "taskId": draft.id
+            ])
         }
         onSave(draft)
         dismiss()
