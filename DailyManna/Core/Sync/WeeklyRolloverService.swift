@@ -50,7 +50,7 @@ struct WeeklyRolloverService {
                 tasksRepository: deps.resolve(type: TasksRepository.self),
                 labelsRepository: deps.resolve(type: LabelsRepository.self)
             )
-            // Fetch candidates: all incomplete tasks in THIS_WEEK
+            // Fetch candidates: all incomplete tasks in THIS_WEEK (including undated)
             let thisWeekPairs = try await taskUC.fetchTasksWithLabels(for: userId, in: .thisWeek)
             let candidates = thisWeekPairs
                 .map { $0.0 }
@@ -67,7 +67,7 @@ struct WeeklyRolloverService {
             let nextWeekPairs = try await taskUC.fetchTasksWithLabels(for: userId, in: .nextWeek)
             let basePos = nextWeekPairs.map { $0.0.position }.max() ?? 0
             
-            // Move each candidate preserving relative order
+            // Move each candidate preserving relative order into NEXT_WEEK unplanned (undated) if they had no due date
             var didAnyMove = false
             for (idx, task) in candidates.enumerated() {
                 let newPos = basePos + stride * Double(idx + 1)
