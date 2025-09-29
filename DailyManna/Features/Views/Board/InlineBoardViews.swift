@@ -48,7 +48,8 @@ struct InlineBoardView: View {
                             onCompleteForever: { task in viewModel.confirmCompleteForever(task) },
                             onAdd: {
                                 viewModel.presentCreateForm(bucket: .thisWeek)
-                            }
+                            },
+                            columnWidth: colWidth
                         )
                         .id(bucket.rawValue)
                     } else if bucket == .nextWeek && viewModel.featureNextWeekSectionsEnabled {
@@ -70,7 +71,8 @@ struct InlineBoardView: View {
                             onCompleteForever: { task in viewModel.confirmCompleteForever(task) },
                             onAdd: {
                                 viewModel.presentCreateForm(bucket: .nextWeek)
-                            }
+                            },
+                            columnWidth: colWidth
                         )
                         .id(bucket.rawValue)
                     } else {
@@ -111,7 +113,8 @@ struct InlineBoardView: View {
                             onSkipNext: { id in _Concurrency.Task { await viewModel.skipNext(taskId: id) } },
                             onGenerateNow: { id in _Concurrency.Task { await viewModel.generateNow(taskId: id) } },
                             onToggleLabel: { taskId, labelId in viewModel.toggleLabel(taskId: taskId, labelId: labelId) },
-                            onSetLabels: { taskId, desired in _Concurrency.Task { await viewModel.setLabels(taskId: taskId, to: desired) } }
+                            onSetLabels: { taskId, desired in _Concurrency.Task { await viewModel.setLabels(taskId: taskId, to: desired) } },
+                            columnWidth: colWidth
                         )
                         .id(bucket.rawValue)
                     }
@@ -142,6 +145,7 @@ struct InlineStandardBucketColumn: View {
     let onGenerateNow: (UUID) -> Void
     let onToggleLabel: (UUID, UUID) -> Void
     let onSetLabels: (UUID, Set<UUID>) -> Void
+    let columnWidth: CGFloat
     @State private var rowFrames: [UUID: CGRect] = [:]
     @State private var isDragActive: Bool = false
     @State private var insertBeforeId: UUID? = nil
@@ -223,7 +227,7 @@ struct InlineStandardBucketColumn: View {
         .surfaceStyle(.content)
         .cornerRadius(12)
         .coordinateSpace(name: "columnDrop")
-        .frame(width: colWidth)
+        .frame(width: columnWidth)
         .onDrop(of: [UTType.plainText], delegate: InlineColumnDropDelegate(
             tasksWithLabels: tasksWithLabels,
             rowFramesProvider: { rowFrames },
@@ -284,6 +288,7 @@ struct InlineThisWeekColumn: View {
     let onGenerateNow: (UUID) -> Void
     let onCompleteForever: (Task) -> Void
     let onAdd: () -> Void
+    let columnWidth: CGFloat
 
     private var sections: [WeekdaySection] { WeekPlanner.buildSections(for: Date()) }
 
@@ -303,7 +308,7 @@ struct InlineThisWeekColumn: View {
         .padding(.vertical, Spacing.small)
         .surfaceStyle(.content)
         .cornerRadius(12)
-        .frame(width: BoardMetrics.columnWidth)
+        .frame(width: columnWidth)
     }
 
     @ViewBuilder
@@ -488,6 +493,7 @@ struct InlineNextWeekColumn: View {
     let onGenerateNow: (UUID) -> Void
     let onCompleteForever: (Task) -> Void
     let onAdd: () -> Void
+    let columnWidth: CGFloat
 
     private var sections: [WeekdaySection] { WeekPlanner.buildNextWeekSections(for: Date()) }
 
@@ -507,7 +513,7 @@ struct InlineNextWeekColumn: View {
         .padding(.vertical, Spacing.small)
         .surfaceStyle(.content)
         .cornerRadius(12)
-        .frame(width: BoardMetrics.columnWidth)
+        .frame(width: columnWidth)
     }
 
     @ViewBuilder
