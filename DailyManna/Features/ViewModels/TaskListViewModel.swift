@@ -1030,13 +1030,15 @@ final class TaskListViewModel: ObservableObject {
         let weekSun = cal.date(byAdding: .day, value: 6, to: weekMon) ?? now
         var changed = false
         for i in tasksWithLabels.indices {
-            var t = tasksWithLabels[i].0
+            let t = tasksWithLabels[i].0
             guard t.isCompleted == false, t.bucketKey == .nextWeek else { continue }
             if let due = t.dueAt {
                 let start = cal.startOfDay(for: due)
                 if start >= weekMon && start <= weekSun {
-                    t.bucketKey = .thisWeek
-                    tasksWithLabels[i].0 = t
+                    // Persist move so counts and future fetches are correct
+                    do { try await taskUseCases.moveTask(id: t.id, to: .thisWeek, for: userId) } catch { }
+                    var updated = t; updated.bucketKey = .thisWeek
+                    tasksWithLabels[i].0 = updated
                     changed = true
                 }
             }
