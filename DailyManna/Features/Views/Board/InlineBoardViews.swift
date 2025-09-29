@@ -463,6 +463,17 @@ struct InlineThisWeekColumn: View {
         }
     }
 
+    private func unplannedBadgeNextWeek(for task: Task) -> String? {
+        let cal = Calendar.current
+        guard let due = task.dueAt else { return "No date" }
+        let nextDates = WeekPlanner.datesOfNextWeek(from: Date(), calendar: cal)
+        guard let first = nextDates.first, let last = nextDates.last else { return nil }
+        let d = cal.startOfDay(for: due)
+        if d < cal.startOfDay(for: first) { return "Past" }
+        if d > cal.startOfDay(for: last) { return "Future" }
+        return nil
+    }
+
     private func unplannedBadgeThisWeek(for task: Task) -> String? {
         let cal = Calendar.current
         let now = Date()
@@ -625,9 +636,24 @@ struct InlineNextWeekColumn: View {
     }
 
     private var unplannedItems: [(Task, [Label])] {
-        tasksWithLabels.filter { pair in
+        let cal = Calendar.current
+        let sectionIds = Set(sections.map { $0.id })
+        return tasksWithLabels.filter { pair in
             let t = pair.0
-            return t.bucketKey == .nextWeek && t.isCompleted == false && t.dueAt == nil
+            guard t.bucketKey == .nextWeek, t.isCompleted == false else { return false }
+            guard let due = t.dueAt else { return true }
+            let key = WeekPlanner.isoDayKey(for: cal.startOfDay(for: due))
+            return sectionIds.contains(key) == false
+        }
+        .sorted { lhs, rhs in
+            let ld = lhs.0.dueAt
+            let rd = rhs.0.dueAt
+            switch (ld, rd) {
+            case let (l?, r?): return l < r
+            case (nil, _?): return false
+            case (_?, nil): return true
+            default: return false
+            }
         }
     }
 
@@ -659,6 +685,19 @@ struct InlineNextWeekColumn: View {
                             onSkipNext: { onSkipNext(pair.0.id) },
                             onGenerateNow: { onGenerateNow(pair.0.id) }
                         )
+                        .overlay(alignment: .topTrailing) {
+                            if let tag = unplannedBadgeNextWeek(for: pair.0) {
+                                Text(tag)
+                                    .style(Typography.caption)
+                                    .foregroundColor(Colors.onSurfaceVariant)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Colors.surface)
+                                    .cornerRadius(6)
+                                    .padding(.top, 6)
+                                    .padding(.trailing, 6)
+                            }
+                        }
                         .contextMenu {
                             Menu("Schedule") {
                                 ForEach(sections, id: \.id) { sec in
