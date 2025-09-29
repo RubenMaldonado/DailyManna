@@ -70,7 +70,17 @@ struct NextWeekSectionsListView: View {
                 }
                 // Unplanned Section (Next Week)
                 Section(header: unplannedHeader) {
-                    let items = unplannedItems()
+                    // Sort unplanned by date ascending (nil last)
+                    let items = unplannedItems().sorted { lhs, rhs in
+                        let ld = lhs.0.dueAt
+                        let rd = rhs.0.dueAt
+                        switch (ld, rd) {
+                        case let (l?, r?): return l < r
+                        case (nil, _?): return false
+                        case (_?, nil): return true
+                        default: return false
+                        }
+                    }
                     if items.isEmpty {
                         Text("No unplanned tasks")
                             .style(Typography.body)
@@ -90,6 +100,19 @@ struct NextWeekSectionsListView: View {
                                     Button("Clear Due Date") { _Concurrency.Task { await viewModel.unschedule(taskId: pair.0.id) } }
                                     Button("Edit") { onEdit(pair.0) }
                                     Button(role: .destructive) { onDelete(pair.0) } label: { Text("Delete") }
+                                }
+                                .overlay(alignment: .topTrailing) {
+                                    if let tag = unplannedBadge(for: livePair.0) {
+                                        Text(tag)
+                                            .style(Typography.caption)
+                                            .foregroundColor(Colors.onSurfaceVariant)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Colors.surface)
+                                            .cornerRadius(6)
+                                            .padding(.top, 6)
+                                            .padding(.trailing, 6)
+                                    }
                                 }
                                 // Single-tap edit handled in TaskCard via onOpenEdit
                         }
@@ -135,10 +158,27 @@ struct NextWeekSectionsListView: View {
     }
 
     private func unplannedItems() -> [(Task, [Label])] {
-        viewModel.tasksWithLabels.filter { pair in
+        let sections = Set(viewModel.nextWeekSections.map { $0.id })
+        let cal = Calendar.current
+        return viewModel.tasksWithLabels.filter { pair in
             let t = pair.0
-            return t.bucketKey == .nextWeek && t.isCompleted == false && t.dueAt == nil
+            guard t.bucketKey == .nextWeek, t.isCompleted == false else { return false }
+            guard let due = t.dueAt else { return true }
+            let key = WeekPlanner.isoDayKey(for: cal.startOfDay(for: due))
+            return sections.contains(key) == false
         }
+    }
+
+    private func unplannedBadge(for task: Task) -> String? {
+        let cal = Calendar.current
+        guard let due = task.dueAt else { return "No date" }
+        // Next week window
+        let nextWeekDates = WeekPlanner.datesOfNextWeek(from: Date(), calendar: cal)
+        guard let first = nextWeekDates.first, let last = nextWeekDates.last else { return nil }
+        let d = cal.startOfDay(for: due)
+        if d < cal.startOfDay(for: first) { return "Past" }
+        if d > cal.startOfDay(for: last) { return "Future" }
+        return nil
     }
 }
 

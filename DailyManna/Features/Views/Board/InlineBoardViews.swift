@@ -366,14 +366,24 @@ struct InlineThisWeekColumn: View {
         let cal = Calendar.current
         let now = Date()
         let monday = WeekPlanner.mondayOfCurrentWeek(for: now, calendar: cal)
-        let friday = WeekPlanner.fridayOfCurrentWeek(for: now, calendar: cal)
+        let sunday = cal.date(byAdding: .day, value: 6, to: monday) ?? now
         return tasksWithLabels.filter { pair in
             let t = pair.0
             guard t.bucketKey == .thisWeek, t.isCompleted == false else { return false }
             guard let due = t.dueAt else { return true }
-            let startDue = cal.startOfDay(for: due)
-            // Include due dates outside current weekday window (Mon..Fri inclusive)
-            return !(startDue >= monday && startDue <= friday)
+            let d = cal.startOfDay(for: due)
+            // Show any THIS_WEEK task whose date is outside Mon..Sun window
+            return d < monday || d > sunday
+        }
+        .sorted { lhs, rhs in
+            let ld = lhs.0.dueAt
+            let rd = rhs.0.dueAt
+            switch (ld, rd) {
+            case let (l?, r?): return l < r
+            case (nil, _?): return false
+            case (_?, nil): return true
+            default: return false
+            }
         }
     }
 
@@ -416,6 +426,19 @@ struct InlineThisWeekColumn: View {
                             onSkipNext: { onSkipNext(pair.0.id) },
                             onGenerateNow: { onGenerateNow(pair.0.id) }
                         )
+                        .overlay(alignment: .topTrailing) {
+                            if let tag = unplannedBadgeThisWeek(for: pair.0) {
+                                Text(tag)
+                                    .style(Typography.caption)
+                                    .foregroundColor(Colors.onSurfaceVariant)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Colors.surface)
+                                    .cornerRadius(6)
+                                    .padding(.top, 6)
+                                    .padding(.trailing, 6)
+                            }
+                        }
                         .contextMenu {
                             Menu("Schedule") {
                                 ForEach(sections, id: \.id) { sec in
@@ -438,6 +461,18 @@ struct InlineThisWeekColumn: View {
             unschedule(item.id)
             return true
         }
+    }
+
+    private func unplannedBadgeThisWeek(for task: Task) -> String? {
+        let cal = Calendar.current
+        let now = Date()
+        let monday = WeekPlanner.mondayOfCurrentWeek(for: now, calendar: cal)
+        let sunday = cal.date(byAdding: .day, value: 6, to: monday) ?? now
+        guard let due = task.dueAt else { return "No date" }
+        let d = cal.startOfDay(for: due)
+        if d < monday { return "Past" }
+        if d > sunday { return "Future" }
+        return nil
     }
 
     @ViewBuilder
