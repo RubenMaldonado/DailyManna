@@ -720,6 +720,19 @@ struct InlineNextWeekColumn: View {
             unschedule(item.id)
             return true
         }
+        
+        // Badge helper for Unplanned items in Next Week column
+        // Shows Past/Future/No date relative to next week's Mon..Sun window
+        private func unplannedBadgeNextWeek(for task: Task) -> String? {
+            let cal = Calendar.current
+            guard let due = task.dueAt else { return "No date" }
+            let nextDates = WeekPlanner.datesOfNextWeek(from: Date(), calendar: cal)
+            guard let first = nextDates.first, let last = nextDates.last else { return nil }
+            let d = cal.startOfDay(for: due)
+            if d < cal.startOfDay(for: first) { return "Past" }
+            if d > cal.startOfDay(for: last) { return "Future" }
+            return nil
+        }
     }
 }
 
