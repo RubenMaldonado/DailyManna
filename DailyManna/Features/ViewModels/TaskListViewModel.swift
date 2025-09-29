@@ -994,6 +994,10 @@ final class TaskListViewModel: ObservableObject {
             Logger.shared.info("No sync service available", category: .ui)
             return
         }
+        // Client safety net: on Mondays flip NEXT_WEEK → THIS_WEEK for tasks due this week
+        if Calendar.current.component(.weekday, from: Date()) == 2 {
+            await clientMondayFlipIfNeeded()
+        }
         
         await syncService.sync(for: userId)
         // Refresh tasks after sync
@@ -1003,6 +1007,10 @@ final class TaskListViewModel: ObservableObject {
     
     func startPeriodicSync() {
         syncService?.startPeriodicSync(for: userId)
+        // Also run client flip guard when timer ticks on Monday
+        if Calendar.current.component(.weekday, from: Date()) == 2 {
+            _Concurrency.Task { await self.clientMondayFlipIfNeeded() }
+        }
     }
     
     func stopPeriodicSync() {
@@ -1012,6 +1020,28 @@ final class TaskListViewModel: ObservableObject {
     func initialSyncIfNeeded() async {
         guard let syncService = syncService else { return }
         await syncService.performInitialSync(for: userId)
+    }
+
+    /// Client-side Monday flip: locally move NEXT_WEEK tasks whose due date falls within current Mon..Sun into THIS_WEEK.
+    private func clientMondayFlipIfNeeded() async {
+        let cal = Calendar.current
+        let now = Date()
+        let weekMon = WeekPlanner.mondayOfCurrentWeek(for: now, calendar: cal)
+        let weekSun = cal.date(byAdding: .day, value: 6, to: weekMon) ?? now
+        var changed = false
+        for i in tasksWithLabels.indices {
+            var t = tasksWithLabels[i].0
+            guard t.isCompleted == false, t.bucketKey == .nextWeek else { continue }
+            if let due = t.dueAt {
+                let start = cal.startOfDay(for: due)
+                if start >= weekMon && start <= weekSun {
+                    t.bucketKey = .thisWeek
+                    tasksWithLabels[i].0 = t
+                    changed = true
+                }
+            }
+        }
+        if changed { await refreshCounts() }
     }
 
     // MARK: - This Week sections & scheduling
