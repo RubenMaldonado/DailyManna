@@ -728,7 +728,8 @@ struct BoardRowFramePreferenceKey: PreferenceKey {
         onSkipNext: {_ in},
         onGenerateNow: {_ in},
         onToggleLabel: {_,_ in},
-        onSetLabels: {_,_ in}
+        onSetLabels: {_,_ in},
+        columnWidth: 420
     )
     .background(Colors.background)
 }
