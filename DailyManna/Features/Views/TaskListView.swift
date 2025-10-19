@@ -26,7 +26,6 @@ struct TaskListView: View {
     @Environment(\.scenePhase) private var scenePhase
     // Throttle to avoid re-entrant toolbar updates when opening filter
     @State private var lastFilterOpenAt: TimeInterval = 0
-    @AppStorage("feature.boardOnly") private var featureBoardOnly: Bool = false
     #if !os(macOS)
     @Environment(\.horizontalSizeClass) private var hSizeClass
     @State private var showBoard: Bool = false
@@ -332,7 +331,9 @@ struct TaskListView: View {
                     onToggle: { task in _Concurrency.Task { await viewModel.toggleTaskCompletion(task: task) } },
                     onEdit: { task in viewModel.presentEditForm(task: task) },
                     onMove: { taskId, bucket in _Concurrency.Task { await viewModel.move(taskId: taskId, to: bucket) } },
-                    onReorder: { taskId, targetIndex in _Concurrency.Task { await viewModel.reorder(taskId: taskId, to: viewModel.selectedBucket, targetIndex: targetIndex) } },
+                    onReorder: { taskId, beforeId in _Concurrency.Task {
+                        await viewModel.reorder(taskId: taskId, to: viewModel.selectedBucket, insertBeforeId: beforeId)
+                    } },
                     onDelete: { task in viewModel.confirmDelete(task) }
                 )
                 .transaction { $0.disablesAnimations = true }

@@ -22,6 +22,8 @@ private enum BoardMetrics {
 }
 struct InlineBoardView: View {
     @ObservedObject var viewModel: TaskListViewModel
+    @StateObject private var templatesVM = TemplatesListViewModel()
+    @State private var templatesCollapsed: Bool = false
     private var buckets: [TimeBucket] { TimeBucket.allCases.sorted { $0.sortOrder < $1.sortOrder } }
     var body: some View {
         GeometryReader { geo in
@@ -75,13 +77,95 @@ struct InlineBoardView: View {
                             columnWidth: colWidth
                         )
                         .id(bucket.rawValue)
+                    } else if bucket == .routines {
+                        // Routines column with Templates section (macOS)
+                        VStack(alignment: .leading, spacing: Spacing.xSmall) {
+                            // Templates
+                            VStack(alignment: .leading, spacing: Spacing.small) {
+                                HStack(spacing: Spacing.small) {
+                                    Button(action: { templatesCollapsed.toggle() }) {
+                                        HStack(spacing: 8) {
+                                            Image(systemName: templatesCollapsed ? "chevron.right" : "chevron.down")
+                                            Text("Templates")
+                                                .style(Typography.headline)
+                                                .foregroundColor(Colors.onSurface)
+                                        }
+                                    }
+                                    .buttonStyle(SecondaryButtonStyle(size: .small))
+                                    Spacer()
+                                    Button(action: { templatesVM.presentNewTemplate() }) { HStack(spacing: 6) { Image(systemName: "plus"); Text("New Template") } }
+                                        .buttonStyle(PrimaryButtonStyle(size: .small))
+                                }
+                                if templatesCollapsed == false {
+                                    TemplatesListView(viewModel: templatesVM)
+                                        .environmentObject(viewModel)
+                                }
+                            }
+                            .padding(Spacing.small)
+                            .surfaceStyle(.content)
+                            .cornerRadius(12)
+
+                            // Upcoming list for routines
+                            InlineStandardBucketColumn(
+                                bucket: bucket,
+                                tasksWithLabels: viewModel.tasksWithLabels
+                                    .filter { t, _ in t.bucketKey == bucket && t.parentTaskId != nil && t.isCompleted == false }
+                                    .sorted { a, b in
+                                        let ta = a.0; let tb = b.0
+                                        let da = ta.dueAt ?? ta.occurrenceDate ?? ta.createdAt
+                                        let db = tb.dueAt ?? tb.occurrenceDate ?? tb.createdAt
+                                        return da < db
+                                    },
+                                subtaskProgressByParent: viewModel.subtaskProgressByParent,
+                                tasksWithRecurrence: viewModel.tasksWithRecurrence,
+                                onDropTask: { taskId, targetIndex in _Concurrency.Task {
+                                    let ids = viewModel.tasksWithLabels.filter { $0.0.bucketKey == bucket && $0.0.isCompleted == false && $0.0.parentTaskId != nil }.map { $0.0.id }
+                                    let beforeId: UUID? = (targetIndex < ids.count) ? ids[targetIndex] : nil
+                                    await viewModel.reorder(taskId: taskId, to: bucket, insertBeforeId: beforeId)
+                                } },
+                                onToggle: { task in _Concurrency.Task { await viewModel.toggleTaskCompletion(task: task, refreshIn: nil) } },
+                                onMove: { taskId, dest in _Concurrency.Task { await viewModel.move(taskId: taskId, to: dest, refreshIn: nil) } },
+                                onEdit: { task in viewModel.presentEditForm(task: task) },
+                                onDelete: { task in viewModel.confirmDelete(task) },
+                                onAdd: {
+                                    var draft = TaskDraft(userId: viewModel.userId, bucket: bucket)
+                                    draft.dueAt = nil
+                                    draft.dueHasTime = false
+                                    viewModel.selectedBucket = bucket
+                                    viewModel.editingTask = nil
+                                    viewModel.isPresentingTaskForm = true
+                                    NotificationCenter.default.post(name: Notification.Name("dm.prefill.draft"), object: nil, userInfo: ["draftId": draft.id])
+                                },
+                                onPauseResume: { id in _Concurrency.Task { await viewModel.pauseResume(taskId: id) } },
+                                onSkipNext: { id in _Concurrency.Task { await viewModel.skipNext(taskId: id) } },
+                                onGenerateNow: { id in _Concurrency.Task { await viewModel.generateNow(taskId: id) } },
+                                onToggleLabel: { taskId, labelId in viewModel.toggleLabel(taskId: taskId, labelId: labelId) },
+                                onSetLabels: { taskId, desired in _Concurrency.Task { await viewModel.setLabels(taskId: taskId, to: desired) } },
+                                columnWidth: colWidth
+                            )
+                        }
+                        .padding(.vertical, Spacing.small)
+                        .surfaceStyle(.content)
+                        .cornerRadius(12)
+                        .frame(width: colWidth)
+                        .task { await templatesVM.load(userId: viewModel.userId) }
+                        .sheet(isPresented: $templatesVM.isPresentingEditor) {
+                            let tpl = templatesVM.editingTemplate
+                            let series = tpl.flatMap { templatesVM.seriesByTemplateId[$0.id] }
+                            NewTemplateView(userId: viewModel.userId, editing: tpl, series: series)
+                        }
+                        .id(bucket.rawValue)
                     } else {
                         InlineStandardBucketColumn(
                             bucket: bucket,
                             tasksWithLabels: viewModel.tasksWithLabels.filter { $0.0.bucketKey == bucket },
                             subtaskProgressByParent: viewModel.subtaskProgressByParent,
                             tasksWithRecurrence: viewModel.tasksWithRecurrence,
-                            onDropTask: { taskId, targetIndex in _Concurrency.Task { await viewModel.reorder(taskId: taskId, to: bucket, targetIndex: targetIndex) } },
+                            onDropTask: { taskId, targetIndex in _Concurrency.Task {
+                                let ids = viewModel.tasksWithLabels.filter { $0.0.bucketKey == bucket && $0.0.isCompleted == false }.map { $0.0.id }
+                                let beforeId: UUID? = (targetIndex < ids.count) ? ids[targetIndex] : nil
+                                await viewModel.reorder(taskId: taskId, to: bucket, insertBeforeId: beforeId)
+                            } },
                             onToggle: { task in _Concurrency.Task { await viewModel.toggleTaskCompletion(task: task, refreshIn: nil) } },
                             onMove: { taskId, dest in _Concurrency.Task { await viewModel.move(taskId: taskId, to: dest, refreshIn: nil) } },
                             onEdit: { task in viewModel.presentEditForm(task: task) },
@@ -635,6 +719,17 @@ struct InlineNextWeekColumn: View {
         .padding(.horizontal, Spacing.xSmall)
     }
 
+    private func unplannedBadgeNextWeek(for task: Task) -> String? {
+        let cal = Calendar.current
+        guard let due = task.dueAt else { return "No date" }
+        let nextDates = WeekPlanner.datesOfNextWeek(from: Date(), calendar: cal)
+        guard let first = nextDates.first, let last = nextDates.last else { return nil }
+        let d = cal.startOfDay(for: due)
+        if d < cal.startOfDay(for: first) { return "Past" }
+        if d > cal.startOfDay(for: last) { return "Future" }
+        return nil
+    }
+
     private var unplannedItems: [(Task, [Label])] {
         let cal = Calendar.current
         let sectionIds = Set(sections.map { $0.id })
@@ -719,19 +814,6 @@ struct InlineNextWeekColumn: View {
             guard let item = items.first else { return false }
             unschedule(item.id)
             return true
-        }
-        
-        // Badge helper for Unplanned items in Next Week column
-        // Shows Past/Future/No date relative to next week's Mon..Sun window
-        private func unplannedBadgeNextWeek(for task: Task) -> String? {
-            let cal = Calendar.current
-            guard let due = task.dueAt else { return "No date" }
-            let nextDates = WeekPlanner.datesOfNextWeek(from: Date(), calendar: cal)
-            guard let first = nextDates.first, let last = nextDates.last else { return nil }
-            let d = cal.startOfDay(for: due)
-            if d < cal.startOfDay(for: first) { return "Past" }
-            if d > cal.startOfDay(for: last) { return "Future" }
-            return nil
         }
     }
 }

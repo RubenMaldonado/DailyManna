@@ -41,7 +41,9 @@ final class DataContainer {
             SavedFilterEntity.self,
             RecurrenceEntity.self,
             RecurrenceInstanceEntity.self,
-            WorkingLogItemEntity.self
+            WorkingLogItemEntity.self,
+            TemplateEntity.self,
+            SeriesEntity.self
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         
@@ -96,20 +98,19 @@ final class DataContainer {
         
         // IMPORTANT: Do not share a single ModelContext across multiple actors.
         // Create one context per repository actor to avoid concurrent access crashes.
-        let tasksContext = ModelContext(modelContainer)
-        tasksContext.autosaveEnabled = true
-        let labelsContext = ModelContext(modelContainer)
-        labelsContext.autosaveEnabled = true
         let syncStateContext = ModelContext(modelContainer)
         syncStateContext.autosaveEnabled = true
-        let workingLogContext = ModelContext(modelContainer)
-        workingLogContext.autosaveEnabled = true
+        // Templates/Tasks/Labels/WorkingLog repos manage their own contexts bound to their actors
+        let seriesContext = ModelContext(modelContainer)
+        seriesContext.autosaveEnabled = true
 
         // Initialize repositories with their own contexts
-        self._tasksRepository = SwiftDataTasksRepository(modelContext: tasksContext)
-        self._labelsRepository = SwiftDataLabelsRepository(modelContext: labelsContext)
+        self._tasksRepository = SwiftDataTasksRepository(modelContainer: modelContainer)
+        self._labelsRepository = SwiftDataLabelsRepository(modelContainer: modelContainer)
         self._syncStateStore = SyncStateStore(modelContext: syncStateContext)
-        self._workingLogRepository = SwiftDataWorkingLogRepository(modelContext: workingLogContext)
+        self._workingLogRepository = SwiftDataWorkingLogRepository(modelContainer: modelContainer)
+        self._templatesRepository = SwiftDataTemplatesRepository(modelContainer: modelContainer)
+        self._seriesRepository = SwiftDataSeriesRepository(modelContext: seriesContext)
     }
     
     /// Private initializer for test containers
@@ -122,7 +123,9 @@ final class DataContainer {
             SavedFilterEntity.self,
             RecurrenceEntity.self,
             RecurrenceInstanceEntity.self,
-            WorkingLogItemEntity.self
+            WorkingLogItemEntity.self,
+            TemplateEntity.self,
+            SeriesEntity.self
         ])
         
         let modelConfiguration = ModelConfiguration(
@@ -138,20 +141,18 @@ final class DataContainer {
         }
         
         // Create isolated contexts per repository for tests as well
-        let tasksContext = ModelContext(modelContainer)
-        tasksContext.autosaveEnabled = true
-        let labelsContext = ModelContext(modelContainer)
-        labelsContext.autosaveEnabled = true
         let syncStateContext = ModelContext(modelContainer)
         syncStateContext.autosaveEnabled = true
-        let workingLogContext = ModelContext(modelContainer)
-        workingLogContext.autosaveEnabled = true
+        let seriesContext = ModelContext(modelContainer)
+        seriesContext.autosaveEnabled = true
         
         // Initialize repositories
-        self._tasksRepository = SwiftDataTasksRepository(modelContext: tasksContext)
-        self._labelsRepository = SwiftDataLabelsRepository(modelContext: labelsContext)
+        self._tasksRepository = SwiftDataTasksRepository(modelContainer: modelContainer)
+        self._labelsRepository = SwiftDataLabelsRepository(modelContainer: modelContainer)
         self._syncStateStore = SyncStateStore(modelContext: syncStateContext)
-        self._workingLogRepository = SwiftDataWorkingLogRepository(modelContext: workingLogContext)
+        self._workingLogRepository = SwiftDataWorkingLogRepository(modelContainer: modelContainer)
+        self._templatesRepository = SwiftDataTemplatesRepository(modelContainer: modelContainer)
+        self._seriesRepository = SwiftDataSeriesRepository(modelContext: seriesContext)
     }
     
     /// Creates a test container with in-memory storage
@@ -176,4 +177,11 @@ final class DataContainer {
     var workingLogRepository: WorkingLogRepository {
         return _workingLogRepository
     }
+    
+    // New repositories
+    private let _templatesRepository: SwiftDataTemplatesRepository
+    private let _seriesRepository: SwiftDataSeriesRepository
+    
+    var templatesRepository: TemplatesRepository { _templatesRepository }
+    var seriesRepository: SeriesRepository { _seriesRepository }
 }

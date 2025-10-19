@@ -6,7 +6,6 @@ struct MacToolbarHost: View {
     let userId: UUID
     @EnvironmentObject private var viewModeStore: ViewModeStore
     @EnvironmentObject private var workingLogVM: WorkingLogPanelViewModel
-    @AppStorage("feature.boardOnly") private var featureBoardOnly: Bool = false
 
     var body: some View {
         TaskListView(viewModel: viewModel, userId: userId)
@@ -16,24 +15,26 @@ struct MacToolbarHost: View {
                 ToolbarItem(placement: .status) {
                     SyncStatusView(isSyncing: viewModel.isSyncing)
                 }
-                // Primary add
+                // Primary action cluster (Add + Working Log + Filter) with consistent spacing
                 ToolbarItem(placement: .primaryAction) {
-                    Button { NotificationCenter.default.post(name: Notification.Name("dm.toolbar.newTask"), object: nil) } label: { SwiftUI.Label("New Task", systemImage: "plus.circle.fill") }
-                        .buttonStyle(PrimaryButtonStyle(size: .small))
-                        .keyboardShortcut("n", modifiers: .command)
-                }
-                // Filter button with count
-                ToolbarItem(placement: .automatic) {
-                    Button {
-                        NotificationCenter.default.post(name: Notification.Name("dm.toolbar.openFilter"), object: nil)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "line.3.horizontal.decrease.circle")
-                            let count = (viewModel.availableOnly ? 1 : 0) + (viewModel.unlabeledOnly ? 1 : 0) + viewModel.activeFilterLabelIds.count
-                            if count > 0 { CountBadge(count: count) }
+                    HStack(spacing: 12) {
+                        Button { NotificationCenter.default.post(name: Notification.Name("dm.toolbar.newTask"), object: nil) } label: { SwiftUI.Label("New Task", systemImage: "plus.circle.fill") }
+                            .buttonStyle(PrimaryButtonStyle(size: .small))
+                            .keyboardShortcut("n", modifiers: .command)
+                        Button { workingLogVM.toggleOpen() } label: { SwiftUI.Label("Working Log", systemImage: workingLogVM.isOpen ? "sidebar.right" : "sidebar.right") }
+                            .buttonStyle(SecondaryButtonStyle(size: .small))
+                            .accessibilityIdentifier("toolbar.workingLogToggle.visible")
+                        Button {
+                            NotificationCenter.default.post(name: Notification.Name("dm.toolbar.openFilter"), object: nil)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "line.3.horizontal.decrease.circle")
+                                let count = (viewModel.availableOnly ? 1 : 0) + (viewModel.unlabeledOnly ? 1 : 0) + viewModel.activeFilterLabelIds.count
+                                if count > 0 { CountBadge(count: count) }
+                            }
                         }
+                        .buttonStyle(SecondaryButtonStyle(size: .small))
                     }
-                    .buttonStyle(SecondaryButtonStyle(size: .small))
                 }
                 // Overflow
                 ToolbarItem(placement: .automatic) {
@@ -41,8 +42,6 @@ struct MacToolbarHost: View {
                         Button("Sync now") { _Concurrency.Task { await viewModel.sync() } }
                         Button("Settings") { NotificationCenter.default.post(name: Notification.Name("dm.toolbar.openSettings"), object: nil) }
                         Divider()
-                        Button { workingLogVM.toggleOpen() } label: { SwiftUI.Label("Working Log", systemImage: workingLogVM.isOpen ? "sidebar.right" : "sidebar.right") }
-                            .accessibilityIdentifier("toolbar.workingLogToggle")
                     } label: {
                         Image(systemName: "ellipsis.circle")
                     }

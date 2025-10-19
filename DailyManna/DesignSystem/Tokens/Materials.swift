@@ -15,9 +15,6 @@ import AppKit
 /// Liquid Glass material tokens and helpers.
 /// These map logical DS materials to platform styles, with safe fallbacks.
 struct Materials {
-    // MARK: - Feature flag (permanent default ON)
-    static let liquidGlassEnabled: Bool = true
-
     // MARK: - Glass ShapeStyles (platform-conditional)
     static var glassChrome: AnyShapeStyle {
         #if os(iOS) || os(macOS)

@@ -61,7 +61,10 @@ struct BucketBoardView: View {
                                 // We'll call reorder to compute exact position
                             }
                             _Concurrency.Task {
-                                await viewModel.reorder(taskId: taskId, to: bucket, targetIndex: targetIndex)
+                                // Compute insertBeforeId from current visible order for incomplete tasks
+                                let ids = viewModel.tasksWithLabels.filter { $0.0.bucketKey == bucket && $0.0.isCompleted == false }.map { $0.0.id }
+                                let beforeId: UUID? = (targetIndex < ids.count) ? ids[targetIndex] : nil
+                                await viewModel.reorder(taskId: taskId, to: bucket, insertBeforeId: beforeId)
                             }
                         },
                         onToggle: { task in

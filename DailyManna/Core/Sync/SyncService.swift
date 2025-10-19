@@ -58,6 +58,23 @@ final class SyncService: ObservableObject {
         self.remoteWorkingLogRepository = remoteWorkingLogRepository
     }
 
+    // MARK: - Helpers
+    /// Compute the appropriate bucket for a given due date based on current local week rules
+    private func computeAutoBucketForDue(_ dueAt: Date, now: Date = Date()) -> TimeBucket {
+        let cal = Calendar.current
+        let startDue = cal.startOfDay(for: dueAt)
+        let weekMonday = WeekPlanner.mondayOfCurrentWeek(for: now, calendar: cal)
+        let weekFriday = WeekPlanner.fridayOfCurrentWeek(for: now, calendar: cal)
+        let weekend = WeekPlanner.saturdayAndSundayOfCurrentWeek(for: now, calendar: cal)
+        let nextMon = WeekPlanner.nextMonday(after: now, calendar: cal)
+        let nextSun = WeekPlanner.nextSunday(after: now, calendar: cal)
+        if startDue >= weekMonday && startDue <= weekFriday { return .thisWeek }
+        if startDue == weekend.saturday || startDue == weekend.sunday { return .weekend }
+        if startDue >= nextMon && startDue <= nextSun { return .nextWeek }
+        if startDue > nextSun { return .nextMonth }
+        return .thisWeek
+    }
+
     /// Updates the current view context used to trim remote deltas during sync
     func setViewContext(bucketKey: String?, dueBy: Date?) {
         currentViewContext = .init(bucketKey: bucketKey, dueBy: dueBy)
@@ -128,6 +145,16 @@ final class SyncService: ObservableObject {
                 }
             }
             
+            // Series-based routines generation (weekly/monthly/yearly via rule)
+            if FeatureFlags.routinesTemplatesEnabled {
+                try await withRetry { [weak self] in
+                    guard let self else { return }
+                    _ = try await Logger.shared.time("seriesRoutinesGeneration") {
+                        try await self.generateSeriesInstancesIfNeeded(userId: userId)
+                    }
+                }
+            }
+
             lastSyncDate = Date()
             // Weekly rollover: run from Saturday 00:00 (local) onward, once per upcoming week
             let didRollover = await WeeklyRolloverService().performIfNeeded(userId: userId)
@@ -154,6 +181,11 @@ final class SyncService: ObservableObject {
         // Resolve checkpoints
         let checkpoints = try await syncStateStore.loadSnapshot(userId: userId)
         
+        // 0. Local reconciliation for ROUTINES templates: ensure single root per template
+        if FeatureFlags.routinesTemplatesEnabled {
+            await reconcileRoutinesRootsLocally(userId: userId)
+        }
+
         // 1. Push local changes to remote
         // Prefer targeted fetch for items needing sync
         let tasksNeedingSync = (try? await localTasksRepository.fetchTasksNeedingSync(for: userId)) ?? []
@@ -221,6 +253,57 @@ final class SyncService: ObservableObject {
         // Update checkpoint using server-sourced timestamps to avoid device clock skew
         if let maxServerUpdated = remoteTasks.map({ $0.updatedAt }).max() {
             try await syncStateStore.updateTasksCheckpoint(userId: userId, to: maxServerUpdated)
+        }
+    }
+
+    /// Consolidate ROUTINES roots: keep one root per template; convert duplicates to children
+    private func reconcileRoutinesRootsLocally(userId: UUID) async {
+        do {
+            let all = try await localTasksRepository.fetchTasks(for: userId, in: .routines)
+            // Group by templateId (fallback to title if templateId missing)
+            let groups: [String: [Task]] = Dictionary(grouping: all.filter { $0.deletedAt == nil }) { t in
+                if let tid = t.templateId { return "TPL::\(tid.uuidString)" }
+                return "TITLE::\(t.title.uppercased())"
+            }
+            for (_, tasks) in groups {
+                // Identify roots (no parent)
+                let roots = tasks.filter { $0.parentTaskId == nil }
+                guard roots.count > 1 else {
+                    // Normalize single root: ensure due_at is nil
+                    if let root = roots.first, root.dueAt != nil {
+                        var fixed = root
+                        fixed.dueAt = nil
+                        fixed.dueHasTime = false
+                        fixed.needsSync = true
+                        try await localTasksRepository.updateTask(fixed)
+                    }
+                    continue
+                }
+                // Keep the oldest by createdAt
+                let kept = roots.sorted { ($0.createdAt) < ($1.createdAt) }.first!
+                // Ensure kept has no due
+                if kept.dueAt != nil {
+                    var fixed = kept
+                    fixed.dueAt = nil
+                    fixed.dueHasTime = false
+                    fixed.needsSync = true
+                    try await localTasksRepository.updateTask(fixed)
+                }
+                // Convert other roots into children under kept
+                for dup in roots where dup.id != kept.id {
+                    var moved = dup
+                    moved.parentTaskId = kept.id
+                    // If it has a due date, set occurrence_date from due
+                    if let d = dup.dueAt { moved.occurrenceDate = Calendar.current.startOfDay(for: d) }
+                    // Move position under parent
+                    let pos = try await localTasksRepository.nextSubtaskBottomPosition(parentTaskId: kept.id)
+                    moved.position = pos
+                    moved.needsSync = true
+                    try await localTasksRepository.updateTask(moved)
+                }
+            }
+        } catch {
+            Logger.shared.error("Local routines reconciliation failed", category: .sync, error: error)
         }
     }
 
@@ -365,6 +448,246 @@ final class SyncService: ObservableObject {
         }
     }
 
+    // MARK: - Weekly routines generation (templates/series)
+    private func generateWeeklyRoutinesIfNeeded(userId: UUID) async throws {
+        let deps = Dependencies.shared
+        // Resolve use cases and repositories
+        let templatesUC = try deps.resolve(type: TemplatesUseCases.self)
+        let seriesUC = try deps.resolve(type: SeriesUseCases.self)
+        let taskUC = try TaskUseCases(
+            tasksRepository: deps.resolve(type: TasksRepository.self),
+            labelsRepository: deps.resolve(type: LabelsRepository.self)
+        )
+
+        // Today forward window [today, today+7)
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: Date())
+        guard let end = cal.date(byAdding: .day, value: 7, to: start) else { return }
+
+        // Enumerate active series
+        let allSeries = try await seriesUC.list(ownerId: userId)
+        let activeSeries = allSeries.filter { $0.status == "active" && ($0.endsOn == nil || $0.endsOn! >= start) }
+
+        for series in activeSeries {
+            // Fetch template for defaults
+            guard let template = try await templatesUC.get(id: series.templateId, ownerId: userId) else { continue }
+            // Compute schedule within window using anchorWeekday (or startsOn weekday) and intervalWeeks.
+            // Idempotency: check existing tasks for (seriesId, occurrenceDate)
+
+            // Build candidate days [start, end)
+            var day = start
+            while day < end {
+                let dateOnly = cal.startOfDay(for: day)
+                // Only generate on matching weekday relative to anchor
+                let anchorW = series.anchorWeekday ?? cal.component(.weekday, from: series.startsOn)
+                let candidateWeekday = cal.component(.weekday, from: dateOnly)
+                guard anchorW == candidateWeekday else {
+                    guard let next = cal.date(byAdding: .day, value: 1, to: day) else { break }
+                    day = next
+                    continue
+                }
+                // Respect weekly interval: number of weeks between series.startsOn and dateOnly must be multiple of intervalWeeks
+                let weeksBetween: Int = {
+                    let comps = cal.dateComponents([.weekOfYear], from: cal.startOfDay(for: series.startsOn), to: dateOnly)
+                    return abs(comps.weekOfYear ?? 0)
+                }()
+                if weeksBetween % max(1, series.intervalWeeks) != 0 {
+                    guard let next = cal.date(byAdding: .day, value: 1, to: day) else { break }
+                    day = next
+                    continue
+                }
+                // Find or create template root in ROUTINES (root has no due_at)
+                let routinesTasks = try await localTasksRepository.fetchTasks(for: userId, in: .routines)
+                var root = routinesTasks.first { $0.parentTaskId == nil && $0.templateId == template.id && $0.deletedAt == nil }
+                if root == nil {
+                    let pos = try await localTasksRepository.nextPositionForBottom(userId: userId, in: .routines)
+                    let rootTask = Task(
+                        userId: userId,
+                        bucketKey: .routines,
+                        position: pos,
+                        parentTaskId: nil,
+                        templateId: template.id,
+                        seriesId: series.id,
+                        title: template.name,
+                        description: template.description,
+                        dueAt: nil,
+                        dueHasTime: false,
+                        occurrenceDate: nil,
+                        recurrenceRule: nil,
+                        priority: template.priority,
+                        reminders: nil,
+                        exceptionMask: nil,
+                        isCompleted: false
+                    )
+                    try await taskUC.createTask(rootTask)
+                    root = rootTask
+                    let labelIds = Set(template.labelsDefault)
+                    if !labelIds.isEmpty { try? await taskUC.setLabels(for: rootTask.id, to: labelIds, userId: userId) }
+                }
+
+                // If child occurrence for this date does not exist, create under root
+                let already = routinesTasks.contains { $0.seriesId == series.id && $0.occurrenceDate == dateOnly && $0.parentTaskId == root?.id && $0.deletedAt == nil }
+                if already == false, let parentId = root?.id {
+                    let childPos = try await localTasksRepository.nextSubtaskBottomPosition(parentTaskId: parentId)
+                    // Compose dueAt from dateOnly + template default time if provided
+                    let dueAt: Date? = {
+                        if let comps = template.defaultDueTime, let h = comps.hour, let m = comps.minute {
+                            var full = cal.dateComponents([.year,.month,.day], from: dateOnly)
+                            full.hour = h; full.minute = m
+                            return cal.date(from: full)
+                        }
+                        return dateOnly // fallback to date-only due date if no time
+                    }()
+                    let child = Task(
+                        userId: userId,
+                        bucketKey: .routines,
+                        position: childPos,
+                        parentTaskId: parentId,
+                        templateId: template.id,
+                        seriesId: series.id,
+                        title: template.name,
+                        description: template.description,
+                        dueAt: dueAt,
+                        dueHasTime: dueAt != nil,
+                        occurrenceDate: dateOnly,
+                        recurrenceRule: nil,
+                        priority: template.priority,
+                        reminders: nil,
+                        exceptionMask: nil,
+                        isCompleted: false
+                    )
+                    try await taskUC.createTask(child)
+                    let labelIds = Set(template.labelsDefault)
+                    if !labelIds.isEmpty { try? await taskUC.setLabels(for: child.id, to: labelIds, userId: userId) }
+                }
+                guard let next = cal.date(byAdding: .day, value: 1, to: day) else { break }
+                day = next
+            }
+        }
+    }
+
+    // MARK: - Series routines generation (weekly/monthly/yearly via rule)
+    private func generateSeriesInstancesIfNeeded(userId: UUID) async throws {
+        let deps = Dependencies.shared
+        // Resolve use cases and repositories
+        let templatesUC = try deps.resolve(type: TemplatesUseCases.self)
+        let seriesUC = try deps.resolve(type: SeriesUseCases.self)
+        let taskUC = try TaskUseCases(
+            tasksRepository: deps.resolve(type: TasksRepository.self),
+            labelsRepository: deps.resolve(type: LabelsRepository.self)
+        )
+
+        // Today forward window [today, today+7)
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: Date())
+        guard let end = cal.date(byAdding: .day, value: 7, to: start) else { return }
+
+        // Enumerate active series
+        let allSeries = try await seriesUC.list(ownerId: userId)
+        let activeSeries = allSeries.filter { $0.status == "active" && ($0.endsOn == nil || $0.endsOn! >= start) }
+
+        let engine = RecurrenceEngine()
+
+        for series in activeSeries {
+            // Fetch template for defaults
+            guard let template = try await templatesUC.get(id: series.templateId, ownerId: userId) else { continue }
+
+            // Build rule (fallback to legacy weekly fields)
+            let rule: RecurrenceRule = {
+                if let r = series.rule { return r }
+                let anchor = series.anchorWeekday ?? cal.component(.weekday, from: series.startsOn)
+                let code: String = { switch anchor { case 1: return "SU"; case 2: return "MO"; case 3: return "TU"; case 4: return "WE"; case 5: return "TH"; case 6: return "FR"; case 7: return "SA"; default: return "MO" } }()
+                return RecurrenceRule(freq: .weekly, interval: max(1, series.intervalWeeks), byWeekday: [code])
+            }()
+
+            // Iterate occurrences in window
+            var occurrences: [Date] = []
+            var probe = cal.startOfDay(for: series.startsOn)
+            var safety = 0
+            while let next = engine.nextOccurrence(from: probe, rule: rule, calendar: cal), next < end, safety < 1000 {
+                safety += 1
+                if next >= start { occurrences.append(cal.startOfDay(for: next)) }
+                probe = next
+            }
+
+            // Generate instances
+            for dateOnly in occurrences {
+                // Find or create template root in ROUTINES (root has no due_at)
+                let routinesTasks = try await localTasksRepository.fetchTasks(for: userId, in: .routines)
+                var root = routinesTasks.first { $0.parentTaskId == nil && $0.templateId == template.id && $0.deletedAt == nil }
+                if root == nil {
+                    let pos = try await localTasksRepository.nextPositionForBottom(userId: userId, in: .routines)
+                    let rootTask = Task(
+                        userId: userId,
+                        bucketKey: .routines,
+                        position: pos,
+                        parentTaskId: nil,
+                        templateId: template.id,
+                        seriesId: series.id,
+                        title: template.name,
+                        description: template.description,
+                        dueAt: nil,
+                        dueHasTime: false,
+                        occurrenceDate: nil,
+                        recurrenceRule: nil,
+                        priority: template.priority,
+                        reminders: nil,
+                        exceptionMask: nil,
+                        isCompleted: false
+                    )
+                    try await taskUC.createTask(rootTask)
+                    root = rootTask
+                    let labelIds = Set(template.labelsDefault)
+                    if !labelIds.isEmpty { try? await taskUC.setLabels(for: rootTask.id, to: labelIds, userId: userId) }
+                }
+
+                // If child occurrence for this date does not exist, create under root
+                let already = routinesTasks.contains { $0.seriesId == series.id && $0.occurrenceDate == dateOnly && $0.parentTaskId == root?.id && $0.deletedAt == nil }
+                if already == false, let parentId = root?.id {
+                    let childPos = try await localTasksRepository.nextSubtaskBottomPosition(parentTaskId: parentId)
+                    // Compose dueAt from dateOnly + template default time if provided, else rule.time
+                    let dueAt: Date? = {
+                        if let comps = template.defaultDueTime, let h = comps.hour, let m = comps.minute {
+                            var full = cal.dateComponents([.year,.month,.day], from: dateOnly)
+                            full.hour = h; full.minute = m
+                            return cal.date(from: full)
+                        }
+                        if let t = rule.time {
+                            let parts = t.split(separator: ":")
+                            if parts.count == 2, let h = Int(parts[0]), let m = Int(parts[1]) {
+                                var full = cal.dateComponents([.year,.month,.day], from: dateOnly)
+                                full.hour = h; full.minute = m
+                                return cal.date(from: full)
+                            }
+                        }
+                        return dateOnly
+                    }()
+                    let child = Task(
+                        userId: userId,
+                        bucketKey: .routines,
+                        position: childPos,
+                        parentTaskId: parentId,
+                        templateId: template.id,
+                        seriesId: series.id,
+                        title: template.name,
+                        description: template.description,
+                        dueAt: dueAt,
+                        dueHasTime: dueAt != nil,
+                        occurrenceDate: dateOnly,
+                        recurrenceRule: nil,
+                        priority: template.priority,
+                        reminders: nil,
+                        exceptionMask: nil,
+                        isCompleted: false
+                    )
+                    try await taskUC.createTask(child)
+                    let labelIds = Set(template.labelsDefault)
+                    if !labelIds.isEmpty { try? await taskUC.setLabels(for: child.id, to: labelIds, userId: userId) }
+                }
+            }
+        }
+    }
+
     // MARK: - Recurrences (pull-only v1; app creates/updates eagerly)
     private func syncRecurrences(userId: UUID) async throws {
         // Pull-only for v1: refresh recurrence flags by reading server rows
@@ -392,7 +715,23 @@ final class SyncService: ObservableObject {
                 guard let next = rec.nextScheduledAt, next <= Date() else { continue }
                 // Load template task and labels
                 if let (template, labels) = try await taskUC.fetchTaskWithLabels(by: rec.taskTemplateId) {
-                    let newTask = Task(userId: template.userId, bucketKey: template.bucketKey, title: template.title, description: template.description, dueAt: next)
+                    // Duplicate guard: if a child exists for this parent+due, skip creating and just advance recurrence
+                    let existingChildren = try? await taskUC.fetchSubTasks(for: template.id)
+                    if let children = existingChildren, children.contains(where: { $0.deletedAt == nil && $0.dueAt == next }) {
+                        var updatedRec = rec
+                        updatedRec.lastGeneratedAt = Date()
+                        if let upcoming = recUC.nextOccurrence(from: next, rule: rec.rule) {
+                            updatedRec.nextScheduledAt = upcoming
+                        } else {
+                            updatedRec.status = "paused"
+                        }
+                        try? await recUC.update(updatedRec)
+                        continue
+                    }
+
+                    // Generate instance and auto-bucket by due date
+                    let instanceBucket = computeAutoBucketForDue(next)
+                    let newTask = Task(userId: template.userId, bucketKey: instanceBucket, parentTaskId: template.id, title: template.title, description: template.description, dueAt: next)
                     try await taskUC.createTask(newTask)
                     let labelIds = Set(labels.map { $0.id })
                     try await taskUC.setLabels(for: newTask.id, to: labelIds, userId: userId)
@@ -400,7 +739,7 @@ final class SyncService: ObservableObject {
                         await NotificationsManager.scheduleDueNotification(taskId: newTask.id, title: newTask.title, dueAt: due, bucketKey: newTask.bucketKey.rawValue)
                     }
                     Logger.shared.info("Catch-up: generated instance for recurrence template=\(rec.taskTemplateId) at=\(next)", category: .sync)
-                    // Advance recurrence so we don't re-generate in the same or next cycles
+                    // Advance recurrence to the next-after-created occurrence
                     var updatedRec = rec
                     updatedRec.lastGeneratedAt = Date()
                     if let upcoming = recUC.nextOccurrence(from: next, rule: rec.rule) {
@@ -433,6 +772,18 @@ final class SyncService: ObservableObject {
             guard let self else { return }
             for await change in await self.realtimeCoordinator.labelChanges {
                 await self.applyTargetedLabelChange(change: change, userId: userId)
+            }
+        }
+        _Concurrency.Task { [weak self] in
+            guard let self else { return }
+            for await _ in await self.realtimeCoordinator.templateChanges {
+                NotificationCenter.default.post(name: Notification.Name("dm.remote.tasks.changed"), object: nil)
+            }
+        }
+        _Concurrency.Task { [weak self] in
+            guard let self else { return }
+            for await _ in await self.realtimeCoordinator.seriesChanges {
+                NotificationCenter.default.post(name: Notification.Name("dm.remote.tasks.changed"), object: nil)
             }
         }
         startRealtimeHints(for: userId)

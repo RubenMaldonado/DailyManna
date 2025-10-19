@@ -11,7 +11,11 @@ protocol RecurrencesRepository: Sendable {
 
 actor SwiftDataRecurrencesRepository: RecurrencesRepository {
     private let modelContext: ModelContext
-    init(modelContext: ModelContext) { self.modelContext = modelContext }
+    init(modelContainer: ModelContainer) {
+        let ctx = ModelContext(modelContainer)
+        ctx.autosaveEnabled = true
+        self.modelContext = ctx
+    }
 
     func list(for userId: UUID) async throws -> [Recurrence] {
         let descriptor = FetchDescriptor<RecurrenceEntity>(predicate: #Predicate { $0.userId == userId && $0.deletedAt == nil })

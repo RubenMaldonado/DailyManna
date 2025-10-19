@@ -81,8 +81,11 @@ final class Dependencies {
         registerSingleton(type: LabelsRepository.self) { dataContainer.labelsRepository }
         registerSingleton(type: WorkingLogRepository.self) { dataContainer.workingLogRepository }
         registerSingleton(type: SyncStateStore.self) { dataContainer.syncStateStore }
+        // New local repos
+        registerSingleton(type: TemplatesRepository.self) { dataContainer.templatesRepository }
+        registerSingleton(type: SeriesRepository.self) { dataContainer.seriesRepository }
         // Recurrences
-        registerSingleton(type: RecurrencesRepository.self) { SwiftDataRecurrencesRepository(modelContext: ModelContext(dataContainer.modelContainer)) }
+        registerSingleton(type: RecurrencesRepository.self) { SwiftDataRecurrencesRepository(modelContainer: dataContainer.modelContainer) }
         registerSingleton(type: SavedFiltersRepository.self) { SupabaseSavedFiltersRepository() }
         
         // Remote Repositories
@@ -90,6 +93,9 @@ final class Dependencies {
         registerSingleton(type: RemoteLabelsRepository.self) { SupabaseLabelsRepository() }
         registerSingleton(type: SupabaseRecurrencesRepository.self) { SupabaseRecurrencesRepository() }
         registerSingleton(type: RemoteWorkingLogRepository.self) { SupabaseWorkingLogRepository() }
+        // New remote repos
+        registerSingleton(type: RemoteTemplatesRepository.self) { SupabaseTemplatesRepository() }
+        registerSingleton(type: RemoteSeriesRepository.self) { SupabaseSeriesRepository() }
         
         // Sync Service
         registerSingleton(type: SyncService.self) {
@@ -124,6 +130,19 @@ final class Dependencies {
         }
         registerSingleton(type: WorkingLogUseCases.self) {
             try! WorkingLogUseCases(repository: self.resolve(type: WorkingLogRepository.self))
+        }
+        // New use cases
+        registerSingleton(type: TemplatesUseCases.self) {
+            try! TemplatesUseCases(
+                local: self.resolve(type: TemplatesRepository.self),
+                remote: self.resolve(type: RemoteTemplatesRepository.self)
+            )
+        }
+        registerSingleton(type: SeriesUseCases.self) {
+            try! SeriesUseCases(
+                local: self.resolve(type: SeriesRepository.self),
+                remote: self.resolve(type: RemoteSeriesRepository.self)
+            )
         }
         
         Logger.shared.info("Dependency injection configured successfully", category: .general)

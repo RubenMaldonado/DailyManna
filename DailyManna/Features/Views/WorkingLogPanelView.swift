@@ -259,14 +259,40 @@ struct WorkingLogPanelView: View {
                     }
                     // Export actions
                     Section("Export") {
-                        Button("Export Markdown") {
+                        Button("Save Markdown As…") {
                             let md = WorkingLogMarkdownExporter.generate(rangeStart: viewModel.dateRange.start, rangeEnd: viewModel.dateRange.end, itemsByDay: viewModel.itemsByDay)
                             let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
-                            let name = "Working-Log_\(f.string(from: viewModel.dateRange.start))_to_\(f.string(from: viewModel.dateRange.end)).md"
-                            do {
-                                let url = try WorkingLogMarkdownExporter.saveToDefaultLocation(filename: name, contents: md)
-                                Telemetry.record(.workingLogExportMarkdown, metadata: ["file": url.lastPathComponent])
-                            } catch {}
+                            let suggested = "Working-Log_\(f.string(from: viewModel.dateRange.start))_to_\(f.string(from: viewModel.dateRange.end)).md"
+                            #if os(macOS)
+                            let panel = NSSavePanel()
+                            panel.allowedContentTypes = [.plainText]
+                            panel.canCreateDirectories = true
+                            panel.nameFieldStringValue = suggested
+                            panel.begin { response in
+                                if response == .OK, let url = panel.url {
+                                    do {
+                                        try md.data(using: .utf8)?.write(to: url)
+                                        Telemetry.record(.workingLogExportMarkdown, metadata: ["file": url.lastPathComponent])
+                                    } catch {
+                                        Logger.shared.error("Failed to save markdown", category: .ui, error: error)
+                                    }
+                                }
+                            }
+                            #else
+                            // iOS fallback: save to default Documents
+                            _ = try? WorkingLogMarkdownExporter.saveToDefaultLocation(filename: suggested, contents: md)
+                            #endif
+                        }
+                        Button("Copy Markdown") {
+                            let md = WorkingLogMarkdownExporter.generate(rangeStart: viewModel.dateRange.start, rangeEnd: viewModel.dateRange.end, itemsByDay: viewModel.itemsByDay)
+                            #if os(macOS)
+                            let pb = NSPasteboard.general
+                            pb.clearContents()
+                            pb.setString(md, forType: .string)
+                            #else
+                            UIPasteboard.general.string = md
+                            #endif
+                            Telemetry.record(.workingLogExportMarkdown, metadata: ["action": "copy"])
                         }
                     }
                 } label: { HStack(spacing: 6) { Image(systemName: "slider.horizontal.3"); Text("Options") } }

@@ -30,6 +30,37 @@ final class RecurrenceEngineTests: XCTestCase {
         // Expect Wednesday (4) in Gregorian 1=Sun..7=Sat
         XCTAssertEqual(wd, 4)
     }
+
+    func testSeriesMonthlyEveryFourMonthsFromOct1() {
+        let engine = RecurrenceEngine()
+        var comps = DateComponents(year: 2025, month: 10, day: 1)
+        let cal = Calendar.current
+        let oct1 = cal.date(from: comps)!
+        let rule = RecurrenceRule(freq: .monthly, interval: 4, byMonthDay: [1], time: "09:00")
+        // Oct 1 -> next should be Feb 1, 2026 when iterating from Oct 1
+        let next = engine.nextOccurrence(from: oct1, rule: rule, calendar: cal)
+        XCTAssertNotNil(next)
+        let dc = cal.dateComponents([.year,.month,.day], from: next!)
+        XCTAssertEqual(dc.year, 2026)
+        XCTAssertEqual(dc.month, 2)
+        XCTAssertEqual(dc.day, 1)
+    }
+
+    func testYearlyNthWeekday() {
+        let engine = RecurrenceEngine()
+        var comps = DateComponents(year: 2025, month: 1, day: 1)
+        let cal = Calendar.current
+        let anchor = cal.date(from: comps)!
+        // Every year: third Monday of March at 10:30
+        let rule = RecurrenceRule(freq: .yearly, interval: 1, byWeekday: ["MO"], bySetPos: [3], byMonth: [3], time: "10:30")
+        let next = engine.nextOccurrence(from: anchor, rule: rule, calendar: cal)
+        XCTAssertNotNil(next)
+        let dc = cal.dateComponents([.month,.weekday,.hour,.minute], from: next!)
+        XCTAssertEqual(dc.month, 3)
+        XCTAssertEqual(dc.weekday, 2) // Monday
+        XCTAssertEqual(dc.hour, 10)
+        XCTAssertEqual(dc.minute, 30)
+    }
 }
 
 

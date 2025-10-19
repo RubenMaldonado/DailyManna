@@ -12,8 +12,10 @@ import SwiftData
 actor SwiftDataTasksRepository: TasksRepository {
     private let modelContext: ModelContext
     
-    init(modelContext: ModelContext) {
-        self.modelContext = modelContext
+    init(modelContainer: ModelContainer) {
+        let ctx = ModelContext(modelContainer)
+        ctx.autosaveEnabled = true
+        self.modelContext = ctx
     }
     
     func fetchTasks(for userId: UUID, in bucket: TimeBucket?) async throws -> [Task] {
@@ -31,9 +33,18 @@ actor SwiftDataTasksRepository: TasksRepository {
         
         // Sort: for a specific bucket by position (incomplete first), else general sort
         if bucket != nil {
-            descriptor.sortBy = [SortDescriptor(\TaskEntity.position, order: .forward), SortDescriptor(\TaskEntity.createdAt, order: .forward)]
+            descriptor.sortBy = [
+                SortDescriptor(\TaskEntity.position, order: .forward),
+                SortDescriptor(\TaskEntity.createdAt, order: .forward),
+                SortDescriptor(\TaskEntity.id, order: .forward)
+            ]
         } else {
-            descriptor.sortBy = [SortDescriptor(\TaskEntity.bucketKey, order: .forward), SortDescriptor(\TaskEntity.position, order: .forward), SortDescriptor(\TaskEntity.createdAt, order: .forward)]
+            descriptor.sortBy = [
+                SortDescriptor(\TaskEntity.bucketKey, order: .forward),
+                SortDescriptor(\TaskEntity.position, order: .forward),
+                SortDescriptor(\TaskEntity.createdAt, order: .forward),
+                SortDescriptor(\TaskEntity.id, order: .forward)
+            ]
         }
         
         let entities = try modelContext.fetch(descriptor)
@@ -121,7 +132,11 @@ actor SwiftDataTasksRepository: TasksRepository {
                 entity.parentTaskId == parentTaskId && entity.deletedAt == nil
             }
         )
-        descriptor.sortBy = [SortDescriptor(\TaskEntity.position, order: .forward), SortDescriptor(\TaskEntity.createdAt, order: .forward)]
+        descriptor.sortBy = [
+            SortDescriptor(\TaskEntity.position, order: .forward),
+            SortDescriptor(\TaskEntity.createdAt, order: .forward),
+            SortDescriptor(\TaskEntity.id, order: .forward)
+        ]
         let entities = try modelContext.fetch(descriptor)
         return entities.map { $0.toDomainModel() }
     }
@@ -225,7 +240,11 @@ actor SwiftDataTasksRepository: TasksRepository {
             predicate: #Predicate<TaskEntity> { entity in
                 entity.userId == userId && entity.bucketKey == bucket.rawValue && entity.deletedAt == nil && entity.isCompleted == false
             },
-            sortBy: [SortDescriptor(\TaskEntity.position, order: .forward)]
+            sortBy: [
+                SortDescriptor(\TaskEntity.position, order: .forward),
+                SortDescriptor(\TaskEntity.createdAt, order: .forward),
+                SortDescriptor(\TaskEntity.id, order: .forward)
+            ]
         )
         let items = try modelContext.fetch(descriptor)
         var pos: Double = 1024

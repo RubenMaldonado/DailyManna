@@ -78,6 +78,19 @@ final class SupabaseTasksRepository: RemoteTasksRepository {
                     return existing.toDomain()
                 }
             }
+            // If decoding failed due to shape mismatch, try fetching by id as a fallback
+            if (error as NSError).domain == NSCocoaErrorDomain || String(describing: error).contains("in the correct format") {
+                if let fetched: TaskDTO = try? await client
+                    .from("tasks")
+                    .select("*")
+                    .eq("id", value: dto.id.uuidString)
+                    .single()
+                    .execute()
+                    .value {
+                    Logger.shared.info("Recovered from create deserialization by fetching row id=\(dto.id)", category: .data)
+                    return fetched.toDomain()
+                }
+            }
             throw error
         }
         
@@ -160,14 +173,32 @@ final class SupabaseTasksRepository: RemoteTasksRepository {
     func updateTask(_ task: Task) async throws -> Task {
         let dto = TaskDTO.from(domain: task)
         
-        let response: TaskDTO = try await client
-            .from("tasks")
-            .update(dto)
-            .eq("id", value: task.id.uuidString)
-            .select()
-            .single()
-            .execute()
-            .value
+        let response: TaskDTO
+        do {
+            response = try await client
+                .from("tasks")
+                .update(dto)
+                .eq("id", value: task.id.uuidString)
+                .select()
+                .single()
+                .execute()
+                .value
+        } catch {
+            // If decoding failed due to shape mismatch, fetch the row by id and proceed
+            if (error as NSError).domain == NSCocoaErrorDomain || String(describing: error).contains("in the correct format") {
+                if let fetched: TaskDTO = try? await client
+                    .from("tasks")
+                    .select("*")
+                    .eq("id", value: dto.id.uuidString)
+                    .single()
+                    .execute()
+                    .value {
+                    Logger.shared.info("Recovered from update deserialization by fetching row id=\(dto.id)", category: .data)
+                    return fetched.toDomain()
+                }
+            }
+            throw error
+        }
         
         Logger.shared.info("Updated task remotely: \(task.id)", category: .data)
         return response.toDomain()
@@ -191,6 +222,7 @@ final class SupabaseTasksRepository: RemoteTasksRepository {
             .is("deleted_at", value: nil)
             .order("position", ascending: true)
             .order("created_at", ascending: true)
+            .order("id", ascending: true)
             .execute()
             .value
         
@@ -214,8 +246,19 @@ final class SupabaseTasksRepository: RemoteTasksRepository {
                 }
                 syncedTasks.append(syncedTask)
             } catch {
-                Logger.shared.error("Failed to sync task \(task.id)", category: .data, error: error)
-                throw error
+                // Make per-row failures non-fatal to allow pull to proceed
+                if let pgError = error as? PostgrestError,
+                   pgError.message.contains("violates check constraint \"chk_routines_due_requires_parent\"") {
+                    Logger.shared.error("Skipping task due to routines due/parent constraint id=\(task.id) title=\(task.title)", category: .data, error: error)
+                    continue
+                }
+                if let pgError = error as? PostgrestError,
+                   pgError.message.contains("duplicate key value violates unique constraint") {
+                    Logger.shared.error("Failed to sync (duplicate) id=\(task.id) title=\(task.title)", category: .data, error: error)
+                    continue
+                }
+                Logger.shared.error("Failed to sync task id=\(task.id) title=\(task.title)", category: .data, error: error)
+                continue
             }
         }
         

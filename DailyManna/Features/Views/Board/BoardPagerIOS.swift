@@ -50,8 +50,8 @@ struct BoardPagerIOS: View {
             StandardBucketPage(viewModel: viewModel, bucket: .nextMonth)
                 .tag(Page.nextMonth.rawValue)
 
-            // Routines
-            StandardBucketPage(viewModel: viewModel, bucket: .routines)
+            // Routines (new page)
+            RoutinesPage(viewModel: viewModel, userId: userId)
                 .tag(Page.routines.rawValue)
             }
             .tabViewStyle(.page(indexDisplayMode: .automatic))
@@ -75,7 +75,20 @@ private struct StandardBucketPage: View {
     @ObservedObject var viewModel: TaskListViewModel
     let bucket: TimeBucket
     var body: some View {
-        let pairs = viewModel.tasksWithLabels.filter { $0.0.bucketKey == bucket && $0.0.isCompleted == false }
+        // Hide ROUTINES roots; only show generated child occurrences. Sort by due/occurrence date.
+        let pairs = viewModel.tasksWithLabels
+            .filter { t, _ in
+                if t.bucketKey != bucket { return false }
+                if t.isCompleted { return false }
+                if bucket == .routines { return t.parentTaskId != nil } // hide roots
+                return true
+            }
+            .sorted { a, b in
+                let ta = a.0; let tb = b.0
+                let da = ta.dueAt ?? ta.occurrenceDate ?? ta.createdAt
+                let db = tb.dueAt ?? tb.occurrenceDate ?? tb.createdAt
+                return da < db
+            }
         ScrollViewReader { _ in
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.xSmall) {
@@ -85,7 +98,9 @@ private struct StandardBucketPage: View {
                         onToggle: { task in _Concurrency.Task { await viewModel.toggleTaskCompletion(task: task) } },
                         onEdit: { task in viewModel.presentEditForm(task: task) },
                         onMove: { taskId, dest in _Concurrency.Task { await viewModel.move(taskId: taskId, to: dest, refreshIn: nil) } },
-                        onReorder: { taskId, targetIndex in _Concurrency.Task { await viewModel.reorder(taskId: taskId, to: bucket, targetIndex: targetIndex) } },
+                        onReorder: { taskId, beforeId in _Concurrency.Task {
+                            await viewModel.reorder(taskId: taskId, to: bucket, insertBeforeId: beforeId)
+                        } },
                         onDelete: { task in viewModel.confirmDelete(task) },
                         coordinateSpaceName: "page_\(bucket.rawValue)"
                     )

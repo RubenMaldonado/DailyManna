@@ -11,7 +11,10 @@ import SwiftUI
 final class SettingsViewModel: ObservableObject {
     @Published var isWorking: Bool = false
     @Published var statusMessage: String? = nil
-    @Published var featureSubtasksEnabled: Bool = true
+    @Published var isPresentingConflictSheet: Bool = false
+    @Published var conflictCandidates: [Task] = []
+    @Published var allNeedingSync: [Task] = []
+    @Published var includeAllNeedingSync: Bool = false
     // Removed rich text feature flag
     
     private let tasksRepository: TasksRepository
@@ -41,6 +44,83 @@ final class SettingsViewModel: ObservableObject {
         self.remoteLabelsRepository = remoteLabelsRepository
         self.syncService = syncService
         self.userId = userId
+    }
+
+    func findSyncConflictCandidates() async {
+        guard !isWorking else { return }
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            // Gather local items that are likely to fail push
+            let needing = try await tasksRepository.fetchTasksNeedingSync(for: userId)
+            let active = needing.filter { $0.deletedAt == nil }
+            allNeedingSync = active.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+            let routinesRoots = active.filter { $0.bucketKey == .routines && $0.parentTaskId == nil }
+
+            // Root with dueAt present violates chk_routines_due_requires_parent
+            var offenders: [UUID: Task] = [:]
+            for t in routinesRoots where t.dueAt != nil { offenders[t.id] = t }
+
+            // Duplicate roots by title (keep oldest per normalized title)
+            let groupsByTitle: [String: [Task]] = Dictionary(grouping: routinesRoots) { t in t.title.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
+            for (_, group) in groupsByTitle {
+                if group.count > 1 {
+                    let sorted = group.sorted { $0.createdAt < $1.createdAt }
+                    for dup in sorted.dropFirst() { offenders[dup.id] = dup }
+                }
+            }
+
+            // Duplicate roots by templateId (keep oldest per template)
+            let groupsByTemplate: [UUID: [Task]] = Dictionary(uniqueKeysWithValues: groupsByTitle.flatMap { _ in [] }) // shim to satisfy compiler
+            // Build template groups separately to avoid Optional key
+            var templateGroups: [UUID: [Task]] = [:]
+            for t in routinesRoots {
+                if let tid = t.templateId { templateGroups[tid, default: []].append(t) }
+            }
+            for (_, group) in templateGroups where group.count > 1 {
+                let sorted = group.sorted { $0.createdAt < $1.createdAt }
+                for dup in sorted.dropFirst() { offenders[dup.id] = dup }
+            }
+
+            conflictCandidates = Array(offenders.values).sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+            isPresentingConflictSheet = true
+        } catch {
+            statusMessage = "Failed to scan conflicts: \(error.localizedDescription)"
+        }
+    }
+
+    func deleteConflictCandidates() async {
+        guard !isWorking else { return }
+        isWorking = true
+        statusMessage = "Cleaning up…"
+        let base = conflictCandidates
+        let extra = includeAllNeedingSync ? allNeedingSync : []
+        // Combine unique by id
+        var seen: Set<UUID> = []
+        let combined = (base + extra).filter { t in
+            if seen.contains(t.id) { return false }
+            seen.insert(t.id)
+            return true
+        }
+        let toDelete = combined
+        conflictCandidates = []
+        allNeedingSync = []
+        includeAllNeedingSync = false
+        isPresentingConflictSheet = false
+        do {
+            for task in toDelete {
+                // Best-effort remote soft delete (ignore if not present)
+                try? await remoteTasksRepository.deleteTask(id: task.id)
+                // Local soft delete
+                try await tasksRepository.deleteTask(by: task.id)
+            }
+            // Trigger a sync to finalize
+            await syncService.sync(for: userId)
+            statusMessage = "Deleted \(toDelete.count) conflicted tasks"
+        } catch {
+            statusMessage = "Cleanup failed: \(error.localizedDescription)"
+        }
+        isWorking = false
     }
     
     func deleteAllData() async {
@@ -211,7 +291,6 @@ struct SettingsView: View {
                     .pickerStyle(.segmented)
                 }
                 Section("Features") {
-                    Toggle("Enable Subtasks & Rich Descriptions", isOn: $viewModel.featureSubtasksEnabled)
                     NavigationLink("Keyboard Shortcuts") { KeyboardShortcutsView() }
                 }
                 Section("Feedback") {
@@ -245,6 +324,14 @@ struct SettingsView: View {
                         .buttonStyle(SecondaryButtonStyle(size: .small))
                 }
                 Section("Danger Zone") {
+                    Button {
+                        _Concurrency.Task { await viewModel.findSyncConflictCandidates() }
+                    } label: {
+                        Text("Find sync-conflicted ROUTINES roots…")
+                    }
+                    .buttonStyle(SecondaryButtonStyle(size: .small))
+                    .disabled(viewModel.isWorking)
+
                     Button(role: .destructive) {
                         _Concurrency.Task { await viewModel.deleteAllData() }
                     } label: {
@@ -300,7 +387,84 @@ struct SettingsView: View {
                 ToolbarItem(placement: .automatic) { Button("Done") { dismiss() }.buttonStyle(SecondaryButtonStyle(size: .small)) }
                 #endif
             }
+            .sheet(isPresented: $viewModel.isPresentingConflictSheet) {
+                ConflictCleanupSheet(viewModel: viewModel)
+            }
         }
+    }
+}
+
+private struct ConflictCleanupSheet: View {
+    @ObservedObject var viewModel: SettingsViewModel
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.small) {
+            Text("Delete conflicted ROUTINES roots?")
+                .style(Typography.title3)
+                .foregroundColor(Colors.onSurface)
+            Toggle("Also include all local tasks pending sync (force delete)", isOn: $viewModel.includeAllNeedingSync)
+                .tint(Colors.warning)
+                .padding(.bottom, Spacing.xSmall)
+            if viewModel.conflictCandidates.isEmpty == false {
+                Text("These tasks appear to be conflicting roots and will be deleted:")
+                    .style(Typography.body)
+                    .foregroundColor(Colors.onSurfaceVariant)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Spacing.xSmall) {
+                        ForEach(viewModel.conflictCandidates, id: \.id) { t in
+                            Text("• \(t.title)")
+                                .style(Typography.body)
+                                .foregroundColor(Colors.onSurface)
+                        }
+                    }
+                }
+                .frame(maxHeight: 240)
+            } else {
+                Text("No detected ROUTINES root conflicts.")
+                    .style(Typography.body)
+                    .foregroundColor(Colors.onSurfaceVariant)
+            }
+            if viewModel.includeAllNeedingSync && viewModel.allNeedingSync.isEmpty == false {
+                Divider()
+                Text("Additionally deleting all local tasks pending sync:")
+                    .style(Typography.body)
+                    .foregroundColor(Colors.onSurfaceVariant)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Spacing.xSmall) {
+                        ForEach(viewModel.allNeedingSync, id: \.id) { t in
+                            Text("• \(t.title)")
+                                .style(Typography.body)
+                                .foregroundColor(Colors.onSurface)
+                        }
+                    }
+                }
+                .frame(maxHeight: 240)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .buttonStyle(SecondaryButtonStyle(size: .small))
+                Button(deleteButtonTitle, role: .destructive) {
+                    _Concurrency.Task { await viewModel.deleteConflictCandidates() }
+                    dismiss()
+                }
+                .buttonStyle(DestructiveButtonStyle())
+                .disabled(totalDeleteCount == 0)
+            }
+        }
+        .padding()
+        .frame(minWidth: 420)
+    }
+    private var totalDeleteCount: Int {
+        var ids: Set<UUID> = []
+        for t in viewModel.conflictCandidates { ids.insert(t.id) }
+        if viewModel.includeAllNeedingSync {
+            for t in viewModel.allNeedingSync { ids.insert(t.id) }
+        }
+        return ids.count
+    }
+    private var deleteButtonTitle: String {
+        "Delete \(totalDeleteCount)"
     }
 }
 

@@ -20,7 +20,7 @@ struct RecurrencePicker: View {
             .onChange(of: preset) { _, _ in rebuildRule() }
 
             if preset == "Weekly" {
-                WeekdayGrid(selected: $weekdays)
+                RecurrenceWeekdayGrid(selected: $weekdays)
                     .onChange(of: weekdays) { _, _ in rebuildRule() }
             }
             if preset == "MonthlyDay" {
@@ -96,7 +96,7 @@ struct RecurrencePicker: View {
     }
 }
 
-private struct WeekdayGrid: View {
+private struct RecurrenceWeekdayGrid: View {
     @Binding var selected: Set<String>
     private let days: [(String,String)] = [("SU","S"),("MO","M"),("TU","T"),("WE","W"),("TH","T"),("FR","F"),("SA","S")]
     var body: some View {

@@ -11,8 +11,10 @@ import SwiftData
 actor SwiftDataWorkingLogRepository: WorkingLogRepository {
     private let modelContext: ModelContext
     
-    init(modelContext: ModelContext) {
-        self.modelContext = modelContext
+    init(modelContainer: ModelContainer) {
+        let ctx = ModelContext(modelContainer)
+        ctx.autosaveEnabled = true
+        self.modelContext = ctx
     }
     
     func create(_ item: WorkingLogItem) async throws {

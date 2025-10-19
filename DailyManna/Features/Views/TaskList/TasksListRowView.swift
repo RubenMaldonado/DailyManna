@@ -8,6 +8,7 @@ struct TasksListRowView: View {
     let onEdit: (Task) -> Void
     let onMove: (UUID, TimeBucket) -> Void
     let onDelete: (Task) -> Void
+    @EnvironmentObject private var viewModel: TaskListViewModel
 
     var body: some View {
         HStack(alignment: .center, spacing: Spacing.small) {
@@ -37,8 +38,7 @@ struct TasksListRowView: View {
                     }
                 }
                 HStack(spacing: Spacing.xxSmall) {
-                    if !labels.isEmpty {
-                        let first = labels.first!
+                    if let first = labels.first {
                         let remaining = max(0, labels.count - 1)
                         LabelChip(label: first)
                         if remaining > 0 {
@@ -50,6 +50,24 @@ struct TasksListRowView: View {
                                 .cornerRadius(6)
                                 .foregroundColor(Colors.onSurfaceVariant)
                         }
+                    }
+                    if task.templateId != nil {
+                        Text("From Template")
+                            .style(Typography.caption)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Colors.surface.opacity(0.08))
+                            .cornerRadius(6)
+                            .foregroundColor(Colors.onSurfaceVariant)
+                    }
+                    if let mask = task.exceptionMask, mask.isEmpty == false {
+                        Text("Exception")
+                            .style(Typography.caption)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Colors.warning.opacity(0.2))
+                            .cornerRadius(6)
+                            .foregroundColor(Colors.onSurface)
                     }
                     if let progress = subtaskProgress, progress.total > 0 {
                         Text("\(progress.completed)/\(progress.total)")
@@ -73,10 +91,23 @@ struct TasksListRowView: View {
                     Button(bucket.displayName) { onMove(task.id, bucket) }
                 }
             }
+            if task.templateId != nil {
+                Menu("Template Actions") {
+                    Button("Make Exception: Title") { _Concurrency.Task { await viewModel.makeException(taskId: task.id, field: "title") } }
+                    Button("Make Exception: Description") { _Concurrency.Task { await viewModel.makeException(taskId: task.id, field: "description") } }
+                    Button("Make Exception: Labels") { _Concurrency.Task { await viewModel.makeException(taskId: task.id, field: "labels") } }
+                    Button("Make Exception: Bucket") { _Concurrency.Task { await viewModel.makeException(taskId: task.id, field: "bucket") } }
+                    Divider()
+                    Button("Reapply Template: Title") { _Concurrency.Task { await viewModel.reapplyTemplate(taskId: task.id, field: "title") } }
+                    Button("Reapply Template: Description") { _Concurrency.Task { await viewModel.reapplyTemplate(taskId: task.id, field: "description") } }
+                    Button("Reapply Template: Labels") { _Concurrency.Task { await viewModel.reapplyTemplate(taskId: task.id, field: "labels") } }
+                    Button("Reapply Template: Bucket") { _Concurrency.Task { await viewModel.reapplyTemplate(taskId: task.id, field: "bucket") } }
+                }
+            }
             Button(role: .destructive) { onDelete(task) } label: { Text("Delete") }
         }
         .accessibilityActions {
-            Button(task.isCompleted ? "Mark incomplete" : "Mark complete") { onToggle(task) }
+            
             Button("Delete") { onDelete(task) }
         }
         #if os(iOS)

@@ -16,10 +16,13 @@ final class TaskEntity {
     var bucketKey: String
     var position: Double
     var parentTaskId: UUID?
+    var templateId: UUID?
+    var seriesId: UUID?
     var title: String
     var taskDescription: String? // Renamed to avoid conflict with Swift's `description`
     var dueAt: Date?
     var dueHasTime: Bool = true
+    var occurrenceDate: Date?
     var recurrenceRule: String?
     var isCompleted: Bool
     var completedAt: Date?
@@ -31,6 +34,7 @@ final class TaskEntity {
     var version: Int
     var remoteId: UUID?
     var needsSync: Bool
+    var exceptionMaskJSON: Data? // JSON-encoded Set<String>
     
     // Note: Relationships are handled through repository queries to avoid SwiftData circular reference issues
     // Sub-tasks are fetched via parentTaskId foreign key
@@ -41,11 +45,14 @@ final class TaskEntity {
         userId: UUID,
         bucketKey: String,
         parentTaskId: UUID? = nil,
+        templateId: UUID? = nil,
+        seriesId: UUID? = nil,
         position: Double = 0,
         title: String,
         taskDescription: String? = nil,
         dueAt: Date? = nil,
         dueHasTime: Bool = true,
+        occurrenceDate: Date? = nil,
         recurrenceRule: String? = nil,
         isCompleted: Bool = false,
         completedAt: Date? = nil,
@@ -54,17 +61,21 @@ final class TaskEntity {
         deletedAt: Date? = nil,
         version: Int = 1,
         remoteId: UUID? = nil,
-        needsSync: Bool = true
+        needsSync: Bool = true,
+        exceptionMaskJSON: Data? = nil
     ) {
         self.id = id
         self.userId = userId
         self.bucketKey = bucketKey
         self.parentTaskId = parentTaskId
+        self.templateId = templateId
+        self.seriesId = seriesId
         self.position = position
         self.title = title
         self.taskDescription = taskDescription
         self.dueAt = dueAt
         self.dueHasTime = dueHasTime
+        self.occurrenceDate = occurrenceDate
         self.recurrenceRule = recurrenceRule
         self.isCompleted = isCompleted
         self.completedAt = completedAt
@@ -74,22 +85,34 @@ final class TaskEntity {
         self.version = version
         self.remoteId = remoteId
         self.needsSync = needsSync
+        self.exceptionMaskJSON = exceptionMaskJSON
     }
     
     // MARK: - Mappers
     
     func toDomainModel() -> Task {
-        Task(
+        let mask: Set<String>? = {
+            guard let data = exceptionMaskJSON else { return nil }
+            if let arr = try? JSONDecoder().decode([String].self, from: data) {
+                return Set(arr)
+            }
+            return nil
+        }()
+        return Task(
             id: id,
             userId: userId,
             bucketKey: TimeBucket(rawValue: bucketKey) ?? .thisWeek,
             position: position,
             parentTaskId: parentTaskId,
+            templateId: templateId,
+            seriesId: seriesId,
             title: title,
             description: taskDescription,
             dueAt: dueAt,
             dueHasTime: dueHasTime,
+            occurrenceDate: occurrenceDate,
             recurrenceRule: recurrenceRule,
+            exceptionMask: mask,
             isCompleted: isCompleted,
             completedAt: completedAt,
             createdAt: createdAt,
@@ -106,10 +129,13 @@ final class TaskEntity {
         self.bucketKey = domain.bucketKey.rawValue
         self.position = domain.position
         self.parentTaskId = domain.parentTaskId
+        self.templateId = domain.templateId
+        self.seriesId = domain.seriesId
         self.title = domain.title
         self.taskDescription = domain.description
         self.dueAt = domain.dueAt
         self.dueHasTime = domain.dueHasTime
+        self.occurrenceDate = domain.occurrenceDate
         self.recurrenceRule = domain.recurrenceRule
         self.isCompleted = domain.isCompleted
         self.completedAt = domain.completedAt
@@ -119,6 +145,11 @@ final class TaskEntity {
         self.version = domain.version
         self.remoteId = domain.remoteId
         self.needsSync = domain.needsSync
+        self.exceptionMaskJSON = {
+            guard let set = domain.exceptionMask else { return nil }
+            let arr = Array(set)
+            return try? JSONEncoder().encode(arr)
+        }()
     }
 }
 
@@ -130,11 +161,14 @@ extension TaskEntity {
             userId: domain.userId,
             bucketKey: domain.bucketKey.rawValue,
             parentTaskId: domain.parentTaskId,
+            templateId: domain.templateId,
+            seriesId: domain.seriesId,
             position: domain.position,
             title: domain.title,
             taskDescription: domain.description,
             dueAt: domain.dueAt,
             dueHasTime: domain.dueHasTime,
+            occurrenceDate: domain.occurrenceDate,
             recurrenceRule: domain.recurrenceRule,
             isCompleted: domain.isCompleted,
             completedAt: domain.completedAt,
@@ -143,7 +177,12 @@ extension TaskEntity {
             deletedAt: domain.deletedAt,
             version: domain.version,
             remoteId: domain.remoteId,
-            needsSync: domain.needsSync
+            needsSync: domain.needsSync,
+            exceptionMaskJSON: {
+                guard let set = domain.exceptionMask else { return nil }
+                let arr = Array(set)
+                return try? JSONEncoder().encode(arr)
+            }()
         )
     }
 }

@@ -49,24 +49,27 @@ struct NextWeekSectionsListView: View {
                         }
                     }
                     .coordinateSpace(name: section.id)
-                    .dropDestination(for: DraggableTaskID.self) { items, location in
-                        guard let item = items.first else { return false }
-                        let items = viewModel.tasksByNextWeekDayKey[section.id]?.filter { !$0.0.isCompleted } ?? []
-                        let orderedIds = items.map { $0.0.id }
-                        let sortedRects: [(Int, CGRect)] = orderedIds.enumerated().compactMap { idx, id in
-                            if let rect = rowFrames[id] { return (idx, rect) } else { return nil }
-                        }.sorted { $0.1.minY < $1.1.minY }
-                        var targetIndex = sortedRects.endIndex
-                        for (idx, rect) in sortedRects { if location.y < rect.midY { targetIndex = idx; break } }
-                        insertBeforeIdByDay[section.id] = targetIndex < orderedIds.count ? orderedIds[targetIndex] : nil
-                        showEndIndicatorByDay[section.id] = targetIndex >= orderedIds.count
-                        Telemetry.record(.taskRescheduledDrag, metadata: ["to_day": section.title])
-                        _Concurrency.Task { await viewModel.schedule(taskId: item.id, to: section.date) }
-                        return true
-                    } isTargeted: { inside in
-                        isDragActive = inside
-                        if inside == false { insertBeforeIdByDay[section.id] = nil; showEndIndicatorByDay[section.id] = false }
-                    }
+                    .onDrop(of: [UTType.plainText], delegate: NextWeekDayDropDelegate(
+                        sectionId: section.id,
+                        sectionDate: section.date,
+                        rowFramesProvider: { rowFrames },
+                        itemsProvider: { viewModel.tasksByNextWeekDayKey[section.id]?.filter { !$0.0.isCompleted } ?? [] },
+                        insertBeforeIdByDay: $insertBeforeIdByDay,
+                        showEndIndicatorByDay: $showEndIndicatorByDay,
+                        isDragActive: $isDragActive,
+                        onPerform: { taskId, beforeId in
+                            Telemetry.record(.taskRescheduledDrag, metadata: ["to_day": section.title])
+                            let cal = Calendar.current
+                            if let current = viewModel.tasksWithLabels.first(where: { $0.0.id == taskId })?.0,
+                               let due = current.dueAt,
+                               cal.startOfDay(for: due) == section.date {
+                                await viewModel.reorder(taskId: taskId, to: .nextWeek, insertBeforeId: beforeId)
+                            } else {
+                                await viewModel.schedule(taskId: taskId, to: section.date)
+                                await viewModel.reorder(taskId: taskId, to: .nextWeek, insertBeforeId: beforeId)
+                            }
+                        }
+                    ))
                 }
                 // Unplanned Section (Next Week)
                 Section(header: unplannedHeader) {
@@ -186,5 +189,51 @@ struct NextWeekRowFramePreferenceKey: PreferenceKey {
     static var defaultValue: [UUID: CGRect] = [:]
     static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) { value.merge(nextValue(), uniquingKeysWith: { _, new in new }) }
 }
+
+// MARK: - Drop delegate for intra-day reordering with live indicator
+struct NextWeekDayDropDelegate: DropDelegate {
+    let sectionId: String
+    let sectionDate: Date
+    let rowFramesProvider: () -> [UUID: CGRect]
+    let itemsProvider: () -> [(Task, [Label])]
+    @Binding var insertBeforeIdByDay: [String: UUID?]
+    @Binding var showEndIndicatorByDay: [String: Bool]
+    @Binding var isDragActive: Bool
+    let onPerform: (UUID, UUID?) async -> Void
+
+    func validateDrop(info: DropInfo) -> Bool {
+        isDragActive = true
+        return info.hasItemsConforming(to: [UTType.plainText])
+    }
+    func dropEntered(info: DropInfo) { isDragActive = true; updateIndicator(info) }
+    func dropUpdated(info: DropInfo) -> DropProposal? { updateIndicator(info); return DropProposal(operation: .move) }
+    func performDrop(info: DropInfo) -> Bool {
+        guard let provider = info.itemProviders(for: [UTType.plainText]).first else { reset(); return false }
+        provider.loadDataRepresentation(forTypeIdentifier: UTType.plainText.identifier) { data, _ in
+            guard let data = data, let str = String(data: data, encoding: .utf8), let uuid = UUID(uuidString: str) else { DispatchQueue.main.async { reset() }; return }
+            let beforeId = insertBeforeIdByDay[sectionId] ?? nil
+            DispatchQueue.main.async {
+                _Concurrency.Task { await onPerform(uuid, beforeId) }
+                reset()
+            }
+        }
+        return true
+    }
+    func dropExited(info: DropInfo) { reset() }
+    private func reset() { insertBeforeIdByDay[sectionId] = nil; showEndIndicatorByDay[sectionId] = false; isDragActive = false }
+    private func updateIndicator(_ info: DropInfo) {
+        let items = itemsProvider().filter { !$0.0.isCompleted }
+        let orderedIds = items.map { $0.0.id }
+        let frames = rowFramesProvider()
+        let sortedRects: [(Int, CGRect)] = orderedIds.enumerated().compactMap { idx, id in
+            if let rect = frames[id] { return (idx, rect) } else { return nil }
+        }.sorted { $0.1.minY < $1.1.minY }
+        var targetIndex = sortedRects.endIndex
+        for (idx, rect) in sortedRects { if info.location.y < rect.midY { targetIndex = idx; break } }
+        insertBeforeIdByDay[sectionId] = targetIndex < orderedIds.count ? orderedIds[targetIndex] : nil
+        showEndIndicatorByDay[sectionId] = targetIndex >= orderedIds.count
+    }
+}
+
 
 

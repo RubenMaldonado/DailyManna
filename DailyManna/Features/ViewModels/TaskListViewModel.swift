@@ -610,22 +610,48 @@ final class TaskListViewModel: ObservableObject {
             // Resolve the true template ID: if no recurrence exists for the given id,
             // check whether this task is a generated instance with a parent template.
             let effectiveTemplateId: UUID
-            if let _ = try? await recUC.getByTaskTemplateId(taskId, userId: userId) {
+            var recurrenceIdToDelete: UUID? = nil
+            if let rec = try? await recUC.getByTaskTemplateId(taskId, userId: userId) {
                 effectiveTemplateId = taskId
+                recurrenceIdToDelete = rec.id
             } else if let (candidate, _) = try? await taskUseCases.fetchTaskWithLabels(by: taskId), let parent = candidate.parentTaskId,
-                      let _ = try? await recUC.getByTaskTemplateId(parent, userId: userId) {
+                      let rec = try? await recUC.getByTaskTemplateId(parent, userId: userId) {
                 effectiveTemplateId = parent
+                recurrenceIdToDelete = rec.id
             } else {
-                // No recurrence found, just complete the task
+                // No Recurrence row found – fall back to legacy behavior:
+                // 1) clear any inline recurrence_rule on the template (or the task itself if it is the template)
+                // 2) complete the current task
+                if let (candidate, _) = try? await taskUseCases.fetchTaskWithLabels(by: taskId) {
+                    // If this is an instance with a parent, attempt to clear recurrence on parent template
+                    if let parent = candidate.parentTaskId, var parentTask = try? await taskUseCases.fetchTaskWithLabels(by: parent)?.0 {
+                        if parentTask.recurrenceRule != nil {
+                            parentTask.recurrenceRule = nil
+                            try? await taskUseCases.updateTask(parentTask)
+                            Logger.shared.info("Cleared legacy recurrence_rule on parent template=\(parent)", category: .ui)
+                        }
+                    } else {
+                        // Otherwise clear on this task if present
+                        var mutable = candidate
+                        if mutable.recurrenceRule != nil {
+                            mutable.recurrenceRule = nil
+                            try? await taskUseCases.updateTask(mutable)
+                            Logger.shared.info("Cleared legacy recurrence_rule on template=\(mutable.id)", category: .ui)
+                        }
+                    }
+                }
+                // Complete the selected task
                 try await taskUseCases.toggleTaskCompletion(id: taskId, userId: userId)
                 await refreshCounts()
                 await fetchTasks(in: nil, showLoading: false)
                 return
             }
 
-            // Delete the recurrence permanently
-            try await recUC.delete(id: effectiveTemplateId)
-            Logger.shared.info("Deleted recurrence for template=\(effectiveTemplateId)", category: .ui)
+            // Delete the recurrence permanently using the recurrence row id
+            if let rid = recurrenceIdToDelete {
+                try await recUC.delete(id: rid)
+                Logger.shared.info("Deleted recurrence for template=\(effectiveTemplateId)", category: .ui)
+            }
             
             // Complete the current task
             try await taskUseCases.toggleTaskCompletion(id: taskId, userId: userId)
@@ -676,13 +702,34 @@ final class TaskListViewModel: ObservableObject {
             let anchorDate = anchor ?? Date()
             guard let next = recUC.nextOccurrence(from: anchorDate, rule: rec.rule) else { return }
             Logger.shared.info("Generate next instance for template=\(effectiveTemplateId) at=\(next)", category: .ui)
-            // Important: link new instance to template via parentTaskId
-            let newTask = Task(userId: template.userId, bucketKey: template.bucketKey, parentTaskId: effectiveTemplateId, title: template.title, description: template.description, dueAt: next)
+            // Duplicate guard: if instance already exists for this parent+due, do not create again; just advance recurrence
+            if let children = try? await taskUseCases.fetchSubTasks(for: effectiveTemplateId),
+               children.contains(where: { $0.deletedAt == nil && $0.dueAt == next }) {
+                var updatedRec = rec
+                updatedRec.lastGeneratedAt = Date()
+                if let upcoming = recUC.nextOccurrence(from: next, rule: rec.rule) {
+                    updatedRec.nextScheduledAt = upcoming
+                } else {
+                    updatedRec.status = "paused"
+                }
+                try? await recUC.update(updatedRec)
+                await refreshCounts()
+                await fetchTasks(in: nil, showLoading: false)
+                return
+            }
+
+            // Important: link new instance to template via parentTaskId and route to time bucket by due date
+            let bucketForInstance = computeAutoBucket(for: next)
+            let newTask = Task(userId: template.userId, bucketKey: bucketForInstance, parentTaskId: effectiveTemplateId, title: template.title, description: template.description, dueAt: next)
             try await taskUseCases.createTask(newTask)
-            // Persist next scheduled on recurrence to avoid duplicate generation bursts
+            // Persist next scheduled to the next-after-created to align with catch-up logic
             var updatedRec = rec
             updatedRec.lastGeneratedAt = Date()
-            updatedRec.nextScheduledAt = next
+            if let upcoming = recUC.nextOccurrence(from: next, rule: rec.rule) {
+                updatedRec.nextScheduledAt = upcoming
+            } else {
+                updatedRec.status = "paused"
+            }
             try? await recUC.update(updatedRec)
             if let due = newTask.dueAt {
                 await NotificationsManager.scheduleDueNotification(taskId: newTask.id, title: newTask.title, dueAt: due, bucketKey: newTask.bucketKey.rawValue)
@@ -718,10 +765,8 @@ final class TaskListViewModel: ObservableObject {
     func save(draft: TaskDraft) async {
         do {
             if let editing = editingTask {
-                var localDraft = draft
-                // Client auto-bucketing guard
-                if let due = localDraft.dueAt { localDraft.bucket = computeAutoBucket(for: due) }
-                let updated = localDraft.applying(to: editing)
+                // Respect explicit bucket selection from the form; do not auto-bucket here
+                let updated = draft.applying(to: editing)
                 try await taskUseCases.updateTask(updated)
                 if let due = updated.dueAt, !updated.isCompleted {
                     let scheduleAt: Date = {
@@ -751,10 +796,8 @@ final class TaskListViewModel: ObservableObject {
                     pendingRecurrenceSelections.removeValue(forKey: updated.id)
                 }
             } else {
-                var localDraft = draft
-                // Client auto-bucketing guard
-                if let due = localDraft.dueAt { localDraft.bucket = computeAutoBucket(for: due) }
-                let newTask = localDraft.toNewTask()
+                // Respect explicit bucket selection from the form; do not auto-bucket here
+                let newTask = draft.toNewTask()
                 try await taskUseCases.createTask(newTask)
                 NotificationCenter.default.post(name: Notification.Name("dm.task.created"), object: nil, userInfo: ["taskId": newTask.id])
                 lastCreatedTaskId = newTask.id
@@ -876,6 +919,16 @@ final class TaskListViewModel: ObservableObject {
             _ = try await Logger.shared.time("reorderCommit_move", category: .perf) {
                 try await taskUseCases.moveTask(id: taskId, to: bucket, for: userId)
             }
+            // If task is part of a series, mark bucket as an exception using current in-memory copy
+            if let idx = tasksWithLabels.firstIndex(where: { $0.0.id == taskId }) {
+                var task = tasksWithLabels[idx].0
+                if task.seriesId != nil {
+                    var mask = task.exceptionMask ?? []
+                    mask.insert("bucket")
+                    task.exceptionMask = mask
+                    try? await taskUseCases.updateTask(task)
+                }
+            }
             await refreshCounts()
             await fetchTasks(in: nil)
         } catch {
@@ -922,61 +975,73 @@ final class TaskListViewModel: ObservableObject {
         bucketCounts[bucket] = (bucketCounts[bucket] ?? 0) + 1
     }
 
-    /// Reorder within a bucket or across buckets: compute position by neighbor midpoints.
-    func reorder(taskId: UUID, to bucket: TimeBucket, targetIndex: Int) async {
-        // Build arrays per bucket, with incomplete tasks only for ordering
-        var columns: [TimeBucket: [(Task, [Label])]] = [:]
-        for (t, ls) in tasksWithLabels {
-            let key = t.bucketKey
-            columns[key, default: []].append((t, ls))
-        }
-        // Filter out completed for ordering calculations
-        func incomplete(_ arr: [(Task, [Label])]) -> [(Task, [Label])] { arr.filter { !$0.0.isCompleted } }
-        let sourceBucket = tasksWithLabels.first(where: { $0.0.id == taskId })?.0.bucketKey
-        guard let source = sourceBucket else { return }
-
-        var sourceArr = incomplete(columns[source] ?? [])
-        var destArr = incomplete(columns[bucket] ?? [])
-
-        // Extract the task
-        guard let srcIdx = sourceArr.firstIndex(where: { $0.0.id == taskId }) else { return }
-        let moving = sourceArr.remove(at: srcIdx)
-        let clampedIndex = max(0, min(targetIndex, destArr.count))
-        destArr.insert(moving, at: clampedIndex)
-
-        // Compute new position using neighbors (stride 1024)
+    /// Reorder within a bucket or across buckets using canonical position order (ignoring visual sort).
+    func reorder(taskId: UUID, to bucket: TimeBucket, insertBeforeId: UUID?) async {
+        // Build destination list of incomplete tasks in canonical order (position ASC, createdAt ASC, id ASC)
+        // Exclude the moving task from neighbor consideration first
         let stride: Double = 1024
-        func positionFor(index: Int, in arr: [(Task, [Label])]) -> Double {
-            if arr.isEmpty { return stride }
-            if index == 0 { return (arr.first!.0.position - stride).rounded() }
-            if index >= arr.count - 1 { return (arr.last!.0.position + stride).rounded() }
-            let prev = arr[index - 1].0.position
-            let next = arr[index + 1].0.position
-            let mid = (prev + next) / 2
-            return mid
+        func canonicalSorted(_ pairs: [(Task, [Label])]) -> [(Task, [Label])] {
+            return pairs.sorted { lhs, rhs in
+                let lt = lhs.0, rt = rhs.0
+                if lt.position != rt.position { return lt.position < rt.position }
+                if lt.createdAt != rt.createdAt { return lt.createdAt < rt.createdAt }
+                return lt.id.uuidString < rt.id.uuidString
+            }
         }
 
-        let newPos = positionFor(index: clampedIndex, in: destArr)
+        let current = tasksWithLabels
+        guard let movingGlobalIdx = current.firstIndex(where: { $0.0.id == taskId }) else { return }
+        let movingPair = current[movingGlobalIdx]
+        // movingTask reference not needed; we use movingPair directly
 
-        // Optimistically update local state list and reorder array within the destination bucket
-        guard let currentGlobalIdx = tasksWithLabels.firstIndex(where: { $0.0.id == taskId }) else { return }
-        var movingPair = tasksWithLabels.remove(at: currentGlobalIdx)
-        movingPair.0.bucketKey = bucket
-        movingPair.0.position = newPos
+        let destCandidates = current.filter { $0.0.bucketKey == bucket && $0.0.isCompleted == false && $0.0.id != taskId }
+        let destArr = canonicalSorted(destCandidates)
 
-        // Build global insertion point relative to incomplete items in destination bucket
-        let destIncompleteEnumerated = tasksWithLabels
-            .enumerated()
-            .filter { $0.element.0.bucketKey == bucket && $0.element.0.isCompleted == false }
-            .map { (idx: $0.offset, task: $0.element.0) }
-
-        let globalInsertIdx: Int = {
-            if clampedIndex <= 0 { return destIncompleteEnumerated.first?.idx ?? tasksWithLabels.endIndex }
-            if clampedIndex >= destIncompleteEnumerated.count { return (destIncompleteEnumerated.last?.idx ?? (tasksWithLabels.endIndex - 1)) + 1 }
-            return destIncompleteEnumerated[clampedIndex].idx
+        // Find neighbor positions based on insertBeforeId
+        let newPos: Double = {
+            if let before = insertBeforeId, let idx = destArr.firstIndex(where: { $0.0.id == before }) {
+                // Previous neighbor is the item before idx (if any); next is at idx
+                if idx == 0 {
+                    // insert at head
+                    let nextPos = destArr.first?.0.position ?? 0
+                    return nextPos - stride
+                } else {
+                    let prevPos = destArr[idx - 1].0.position
+                    let nextPos = destArr[idx].0.position
+                    return (prevPos + nextPos) / 2.0
+                }
+            } else {
+                // Append to end
+                let tailPos = destArr.last?.0.position ?? 0
+                return tailPos + stride
+            }
         }()
 
-        tasksWithLabels.insert(movingPair, at: min(globalInsertIdx, tasksWithLabels.count))
+        // Optimistic local update: remove from current location and insert near the beforeId in global list for better UX
+        var updated = tasksWithLabels
+        _ = updated.remove(at: movingGlobalIdx)
+        var updatedMoving = movingPair
+        updatedMoving.0.bucketKey = bucket
+        updatedMoving.0.position = newPos
+
+        // Compute global insertion index using beforeId among incomplete items in destination bucket
+        let destIncompleteEnumerated = updated
+            .enumerated()
+            .filter { $0.element.0.bucketKey == bucket && $0.element.0.isCompleted == false }
+            .map { (idx: $0.offset, id: $0.element.0.id) }
+
+        let globalInsertIdx: Int = {
+            if let before = insertBeforeId, let found = destIncompleteEnumerated.first(where: { $0.id == before }) {
+                return found.idx
+            }
+            return (destIncompleteEnumerated.last?.idx ?? (updated.endIndex - 1)) + 1
+        }()
+
+        updated.insert(updatedMoving, at: min(max(0, globalInsertIdx), updated.count))
+        tasksWithLabels = updated
+        // Recompute weekday groupings so section UIs reflect new order immediately
+        if featureThisWeekSectionsEnabled { deriveThisWeekSectionsAndGroups() }
+        if featureNextWeekSectionsEnabled { deriveNextWeekSectionsAndGroups() }
 
         // Persist remotely
         do {
@@ -1195,6 +1260,53 @@ final class TaskListViewModel: ObservableObject {
             await fetchTasks(in: nil, showLoading: false)
         } catch {
             Logger.shared.error("Failed to clear recurrence", category: .ui, error: error)
+        }
+    }
+
+    // MARK: - Template Exceptions
+    func makeException(taskId: UUID, field: String) async {
+        do {
+            let repo = try Dependencies.shared.resolve(type: TasksRepository.self)
+            guard var task = try await repo.fetchTask(by: taskId) else { return }
+            var mask = task.exceptionMask ?? []
+            mask.insert(field)
+            task.exceptionMask = mask
+            try await taskUseCases.updateTask(task)
+            await fetchTasks(in: nil, showLoading: false)
+        } catch {
+            Logger.shared.error("Failed to make exception field=\(field)", category: .ui, error: error)
+        }
+    }
+    func reapplyTemplate(taskId: UUID, field: String) async {
+        do {
+            let repo = try Dependencies.shared.resolve(type: TasksRepository.self)
+            guard var task = try await repo.fetchTask(by: taskId) else { return }
+            var mask = task.exceptionMask ?? []
+            mask.remove(field)
+            task.exceptionMask = mask
+            // Reapply only allowed for fields we know: title/description/priority/labels/bucket
+            if let seriesId = task.seriesId, let tplId = task.templateId {
+                // Fetch template to restore defaults
+                let deps = Dependencies.shared
+                let tplUC = try deps.resolve(type: TemplatesUseCases.self)
+                if let tpl = try await tplUC.get(id: tplId, ownerId: userId) {
+                    switch field {
+                    case "title": task.title = tpl.name
+                    case "description": task.description = tpl.description
+                    case "priority": task.priority = tpl.priority
+                    case "bucket": task.bucketKey = TimeBucket.routines
+                    case "labels":
+                        let labelIds = Set(tpl.labelsDefault)
+                        try? await taskUseCases.setLabels(for: task.id, to: labelIds, userId: userId)
+                    default: break
+                    }
+                }
+                _ = seriesId // reserved for future per-series behavior
+            }
+            try await taskUseCases.updateTask(task)
+            await fetchTasks(in: nil, showLoading: false)
+        } catch {
+            Logger.shared.error("Failed to reapply template field=\(field)", category: .ui, error: error)
         }
     }
 }

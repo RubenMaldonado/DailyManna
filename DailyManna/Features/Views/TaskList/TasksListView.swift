@@ -8,7 +8,7 @@ struct TasksListView: View {
     let onToggle: (Task) -> Void
     let onEdit: (Task) -> Void
     let onMove: (UUID, TimeBucket) -> Void
-    let onReorder: (UUID, Int) -> Void
+    let onReorder: (UUID, UUID?) -> Void
     let onDelete: (Task) -> Void
     @EnvironmentObject private var viewModelFromEnv: TaskListViewModel
     @State private var rowFrames: [UUID: CGRect] = [:]
@@ -55,9 +55,10 @@ struct TasksListView: View {
         }.sorted { $0.1.minY < $1.1.minY }
         var targetIndex = sortedRects.endIndex
         for (idx, rect) in sortedRects { if location.y < rect.midY { targetIndex = idx; break } }
-        insertBeforeId = targetIndex < orderedIds.count ? orderedIds[targetIndex] : nil
+        let beforeId = targetIndex < orderedIds.count ? orderedIds[targetIndex] : nil
+        insertBeforeId = beforeId
         showEndIndicator = targetIndex >= orderedIds.count
-        onReorder(id, targetIndex)
+        onReorder(id, beforeId)
     }
     @ViewBuilder private var content: some View {
         ForEach(tasksWithLabels, id: \.0.id) { pair in
@@ -86,7 +87,7 @@ struct TasksListContent: View {
     let onToggle: (Task) -> Void
     let onEdit: (Task) -> Void
     let onMove: (UUID, TimeBucket) -> Void
-    let onReorder: (UUID, Int) -> Void
+    let onReorder: (UUID, UUID?) -> Void
     let onDelete: (Task) -> Void
     let coordinateSpaceName: String
 
@@ -130,9 +131,10 @@ struct TasksListContent: View {
         }.sorted { $0.1.minY < $1.1.minY }
         var targetIndex = sortedRects.endIndex
         for (idx, rect) in sortedRects { if location.y < rect.midY { targetIndex = idx; break } }
-        insertBeforeId = targetIndex < orderedIds.count ? orderedIds[targetIndex] : nil
+        let beforeId = targetIndex < orderedIds.count ? orderedIds[targetIndex] : nil
+        insertBeforeId = beforeId
         showEndIndicator = targetIndex >= orderedIds.count
-        onReorder(id, targetIndex)
+        onReorder(id, beforeId)
     }
 }
 

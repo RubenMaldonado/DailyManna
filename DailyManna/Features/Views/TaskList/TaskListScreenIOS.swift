@@ -15,7 +15,6 @@ struct TaskListScreenIOS: View {
     @State private var savedFilters: [SavedFilter] = []
     @State private var viewMode: TaskListView.ViewMode = .board
     @State private var lastFilterOpenAt: TimeInterval = 0
-    @AppStorage("feature.boardOnly") private var featureBoardOnly: Bool = false
 
     var body: some View {
         VStack(spacing: 8) {

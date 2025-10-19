@@ -12,8 +12,10 @@ import SwiftData
 actor SwiftDataLabelsRepository: LabelsRepository {
     private let modelContext: ModelContext
     
-    init(modelContext: ModelContext) {
-        self.modelContext = modelContext
+    init(modelContainer: ModelContainer) {
+        let ctx = ModelContext(modelContainer)
+        ctx.autosaveEnabled = true
+        self.modelContext = ctx
     }
     
     func fetchLabels(for userId: UUID) async throws -> [Label] {
