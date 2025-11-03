@@ -56,7 +56,7 @@ final class AddTaskPanelController: NSObject, NSWindowDelegate {
         panel.delegate = self
         panel.contentViewController = hostingController
 
-        positionPanelIfNeeded(panel)
+        centerPanel(panel)
 
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
@@ -136,13 +136,17 @@ final class AddTaskPanelController: NSObject, NSWindowDelegate {
         return panel
     }
 
-    private func positionPanelIfNeeded(_ panel: NSPanel) {
-        guard let screen = NSScreen.main else { return }
-        if panel.frame.origin == .zero {
-            let frame = panel.frameRect(forContentRect: NSRect(x: 0, y: 0, width: 520, height: 420))
-            let x = screen.frame.midX - frame.width / 2
-            let y = screen.frame.midY - frame.height / 2
-            panel.setFrameOrigin(NSPoint(x: x, y: y))
+    private func centerPanel(_ panel: NSPanel) {
+        if let screen = panel.screen ?? NSScreen.main {
+            var frame = panel.frame
+            let size = frame.size
+            let origin = NSPoint(
+                x: screen.frame.midX - size.width / 2,
+                y: screen.frame.midY - size.height / 2
+            )
+            panel.setFrame(NSRect(origin: origin, size: size), display: false)
+        } else {
+            panel.center()
         }
     }
 
