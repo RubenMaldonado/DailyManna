@@ -17,7 +17,7 @@ final class TaskListViewModel: ObservableObject {
     @Published var tasksWithRecurrence: Set<UUID> = []
     @Published var subtaskProgressByParent: [UUID: (completed: Int, total: Int)] = [:]
     @Published var isLoading: Bool = false
-    @Published var errorMessage: String? = nil
+    @Published var notice: AlertNoticeModel? = nil
     @Published var isSyncing: Bool = false
     @Published var selectedBucket: TimeBucket = .thisWeek
     @Published var bucketCounts: [TimeBucket: Int] = [:]
@@ -29,11 +29,10 @@ final class TaskListViewModel: ObservableObject {
     // Board-only: always treat fetches as all-buckets (nil filter)
     @Published var isBoardModeActive: Bool = true
     @Published var forceAllBuckets: Bool = true
-    @Published var syncErrorMessage: String? = nil
+    @Published var syncNotice: AlertNoticeModel? = nil
     @Published var prefilledDraft: TaskDraft? = nil
-    // Snackbar state for temporary notifications like completion undo
-    @Published var snackbarMessage: String? = nil
-    @Published var snackbarIsPresented: Bool = false
+    // Toast state for temporary notifications like completion undo
+    @Published var toast: AlertToastModel? = nil
     private var lastCompletedTaskSnapshot: Task? = nil
     @Published var lastCreatedTaskId: UUID? = nil
     @AppStorage("sortByDueDate") private var sortByDueDate: Bool = false
@@ -128,7 +127,21 @@ final class TaskListViewModel: ObservableObject {
             syncService.$syncError
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] error in
-                    self?.syncErrorMessage = error?.localizedDescription
+                    guard let self else { return }
+                    if let error {
+                        let retry = AlertAction(title: "Retry", kind: .primary) { [weak self] in
+                            guard let self else { return }
+                            _Concurrency.Task { await self.sync() }
+                        }
+                self.syncNotice = AlertNoticeModel(
+                    tone: .warning,
+                    title: "Sync issue",
+                    message: error.localizedDescription,
+                    primaryAction: retry
+                )
+                    } else {
+                        self.syncNotice = nil
+                    }
                 }
                 .store(in: &cancellables)
             // Refresh lists whenever a sync cycle finishes successfully
@@ -139,7 +152,7 @@ final class TaskListViewModel: ObservableObject {
                 .sink { [weak self] _ in
                     guard let self else { return }
                     // Auto-hide sync error on success
-                    self.syncErrorMessage = nil
+                    self.syncNotice = nil
                     // Mark recurrence cache dirty so we refresh flags lazily on next fetch
                     self.recurrenceCacheDirty = true
                     _Concurrency.Task {
@@ -193,7 +206,11 @@ final class TaskListViewModel: ObservableObject {
                             tasksWithLabels[revertIdx].1.removeAll { $0.id == labelId }
                         }
                     }
-                    errorMessage = "Failed to update labels: \(error.localizedDescription)"
+                    presentNotice(
+                        tone: .danger,
+                        title: "Label update failed",
+                        message: "Failed to update labels: \(error.localizedDescription)"
+                    )
                 }
             }
         }
@@ -211,7 +228,11 @@ final class TaskListViewModel: ObservableObject {
                 tasksWithLabels[index].1 = newLabels
             }
         } catch {
-            await MainActor.run { self.errorMessage = "Failed to apply labels: \(error.localizedDescription)" }
+            presentNotice(
+                tone: .danger,
+                title: "Label update failed",
+                message: "Failed to apply labels: \(error.localizedDescription)"
+            )
         }
     }
 
@@ -229,9 +250,8 @@ final class TaskListViewModel: ObservableObject {
         let bucketKey = effectiveBucket?.rawValue
         let dueBy = availableOnly ? availableCutoffEndOfToday() : nil
         syncService?.setViewContext(bucketKey: bucketKey, dueBy: dueBy)
-        // Keep current content visible when changing filters in all-buckets/macOS to avoid blank UI
         if showLoading { isLoading = true }
-        errorMessage = nil
+        clearNotice()
         do {
             let rawPairs = try await Logger.shared.time("fetchTasksWithLabels", category: .perf) {
                 try await taskUseCases.fetchTasksWithLabels(for: userId, in: effectiveBucket)
@@ -314,7 +334,11 @@ final class TaskListViewModel: ObservableObject {
             if featureThisWeekSectionsEnabled { deriveThisWeekSectionsAndGroups() }
             if featureNextWeekSectionsEnabled { deriveNextWeekSectionsAndGroups() }
         } catch {
-            errorMessage = "Failed to fetch tasks: \(error.localizedDescription)"
+            presentNotice(
+                tone: .danger,
+                title: "Task fetch failed",
+                message: "Failed to fetch tasks: \(error.localizedDescription)"
+            )
             Logger.shared.error("Failed to fetch tasks", category: .ui, error: error)
         }
         if showLoading { isLoading = false }
@@ -532,16 +556,26 @@ final class TaskListViewModel: ObservableObject {
             if wasCompleted == false {
                 await generateNextInstanceIfRecurring(templateTaskId: task.id)
             }
-            // Present snackbar with Undo when marking complete
+            // Present toast with Undo when marking complete
             if wasCompleted == false {
-                await MainActor.run {
-                    self.snackbarMessage = "Task completed"
-                    self.snackbarIsPresented = true
-                    self.lastCompletedTaskSnapshot = task
+                let undoAction = AlertAction(title: "Undo", kind: .link) { [weak self] in
+                    guard let self else { return }
+                    _Concurrency.Task { await self.undoLastCompletion() }
                 }
+                lastCompletedTaskSnapshot = task
+                presentToast(
+                    tone: .success,
+                    title: "Task completed",
+                    message: "Undo within a few seconds if this was accidental.",
+                    action: undoAction
+                )
             }
         } catch {
-            errorMessage = "Failed to toggle task completion: \(error.localizedDescription)"
+            presentNotice(
+                tone: .danger,
+                title: "Task completion failed",
+                message: "Failed to toggle task completion: \(error.localizedDescription)"
+            )
             Logger.shared.error("Failed to toggle task completion", category: .ui, error: error)
         }
     }
@@ -555,11 +589,17 @@ final class TaskListViewModel: ObservableObject {
             await refreshCounts()
             await fetchTasks(in: nil, showLoading: false)
             await MainActor.run {
-                snackbarIsPresented = false
-                lastCompletedTaskSnapshot = nil
+                self.clearToast()
+                self.lastCompletedTaskSnapshot = nil
             }
         } catch {
-            await MainActor.run { errorMessage = "Failed to undo: \(error.localizedDescription)" }
+            await MainActor.run {
+                presentNotice(
+                    tone: .danger,
+                    title: "Undo failed",
+                    message: "Failed to undo: \(error.localizedDescription)"
+                )
+            }
         }
     }
 
@@ -662,13 +702,16 @@ final class TaskListViewModel: ObservableObject {
             
             // Show success message
             await MainActor.run {
-                self.snackbarMessage = "Recurrence stopped and task completed"
-                self.snackbarIsPresented = true
+                self.toast = AlertToastModel(tone: .success, message: "Recurrence stopped and task completed")
             }
         } catch {
             Logger.shared.error("Failed to complete forever", category: .ui, error: error)
             await MainActor.run {
-                self.errorMessage = "Failed to complete forever: \(error.localizedDescription)"
+                self.presentNotice(
+                    tone: .danger,
+                    title: "Complete forever failed",
+                    message: "Failed to complete forever: \(error.localizedDescription)"
+                )
             }
         }
     }
@@ -830,7 +873,11 @@ final class TaskListViewModel: ObservableObject {
             await fetchTasks(in: nil)
             prefilledDraft = nil
         } catch {
-            errorMessage = "Failed to save task: \(error.localizedDescription)"
+            presentNotice(
+                tone: .danger,
+                title: "Save failed",
+                message: "Failed to save task: \(error.localizedDescription)"
+            )
             Logger.shared.error("Failed to save task", category: .ui, error: error)
         }
     }
@@ -893,7 +940,11 @@ final class TaskListViewModel: ObservableObject {
             await refreshCounts()
             await fetchTasks(in: nil)
         } catch {
-            errorMessage = "Failed to delete task: \(error.localizedDescription)"
+            presentNotice(
+                tone: .danger,
+                title: "Delete failed",
+                message: "Failed to delete task: \(error.localizedDescription)"
+            )
             Logger.shared.error("Failed to delete task", category: .ui, error: error)
         }
     }
@@ -918,7 +969,7 @@ final class TaskListViewModel: ObservableObject {
         if let idx = tasksWithLabels.firstIndex(where: { $0.0.id == taskId }) {
             let task = tasksWithLabels[idx].0
             if task.templateId != nil, task.parentTaskId != nil, bucket != task.bucketKey {
-                errorMessage = "Template tasks move automatically. Edit the template to change its schedule."
+                presentTemplateGuardNotice()
                 return
             }
         }
@@ -940,9 +991,17 @@ final class TaskListViewModel: ObservableObject {
             await fetchTasks(in: nil)
         } catch {
             if let domainError = error as? DomainError {
-                errorMessage = domainError.errorDescription
+                presentNotice(
+                    tone: .danger,
+                    title: "Move failed",
+                    message: domainError.errorDescription ?? "Unknown domain error"
+                )
             } else {
-                errorMessage = "Failed to move task: \(error.localizedDescription)"
+                presentNotice(
+                    tone: .danger,
+                    title: "Move failed",
+                    message: "Failed to move task: \(error.localizedDescription)"
+                )
             }
             Logger.shared.error("Failed to move task", category: .ui, error: error)
         }
@@ -955,7 +1014,11 @@ final class TaskListViewModel: ObservableObject {
             await refreshCounts()
             await fetchTasks(in: nil, showLoading: false)
         } catch {
-            errorMessage = "Failed to add task: \(error.localizedDescription)"
+            presentNotice(
+                tone: .danger,
+                title: "Task creation failed",
+                message: "Failed to add task: \(error.localizedDescription)"
+            )
             Logger.shared.error("Failed to add task", category: .ui, error: error)
         }
     }
@@ -966,7 +1029,11 @@ final class TaskListViewModel: ObservableObject {
             await refreshCounts()
             await fetchTasks(in: nil)
         } catch {
-            errorMessage = "Failed to delete task: \(error.localizedDescription)"
+            presentNotice(
+                tone: .danger,
+                title: "Delete failed",
+                message: "Failed to delete task: \(error.localizedDescription)"
+            )
             Logger.shared.error("Failed to delete task", category: .ui, error: error)
         }
     }
@@ -1005,7 +1072,7 @@ final class TaskListViewModel: ObservableObject {
         let movingPair = current[movingGlobalIdx]
         // movingTask reference not needed; we use movingPair directly
         if movingPair.0.templateId != nil, movingPair.0.parentTaskId != nil, bucket != movingPair.0.bucketKey {
-            errorMessage = "Template tasks move automatically. Edit the template to change its schedule."
+            presentTemplateGuardNotice()
             return
         }
 
@@ -1065,9 +1132,17 @@ final class TaskListViewModel: ObservableObject {
             }
         } catch {
             if let domainError = error as? DomainError {
-                errorMessage = domainError.errorDescription
+                presentNotice(
+                    tone: .danger,
+                    title: "Reorder failed",
+                    message: domainError.errorDescription ?? "Unknown domain error"
+                )
             } else {
-                errorMessage = "Failed to reorder: \(error.localizedDescription)"
+                presentNotice(
+                    tone: .danger,
+                    title: "Reorder failed",
+                    message: "Failed to reorder: \(error.localizedDescription)"
+                )
             }
             Logger.shared.error("Failed to reorder task", category: .ui, error: error)
         }
@@ -1211,7 +1286,7 @@ final class TaskListViewModel: ObservableObject {
         guard let idx = tasksWithLabels.firstIndex(where: { $0.0.id == taskId }) else { return }
         var task = tasksWithLabels[idx].0
         if task.templateId != nil, task.parentTaskId != nil {
-            errorMessage = "Template tasks move automatically. Edit the template to change its schedule."
+            presentTemplateGuardNotice()
             return
         }
         let cal = Calendar.current
@@ -1234,11 +1309,18 @@ final class TaskListViewModel: ObservableObject {
             let auto = computeAutoBucket(for: due)
             task.bucketKey = auto
         }
+        tasksWithLabels[idx].0 = task
         do {
             try await taskUseCases.updateTask(task)
-            await fetchTasks(in: nil, showLoading: false)
+            await refreshCounts()
+            await fetchTasks(in: nil)
         } catch {
-            errorMessage = "Failed to reschedule: \(error.localizedDescription)"
+            presentNotice(
+                tone: .danger,
+                title: "Schedule failed",
+                message: "Failed to reschedule: \(error.localizedDescription)"
+            )
+            Logger.shared.error("Failed to reschedule task", category: .ui, error: error)
         }
     }
 
@@ -1247,17 +1329,23 @@ final class TaskListViewModel: ObservableObject {
         guard let idx = tasksWithLabels.firstIndex(where: { $0.0.id == taskId }) else { return }
         var task = tasksWithLabels[idx].0
         if task.templateId != nil, task.parentTaskId != nil {
-            errorMessage = "Template tasks move automatically. Edit the template to change its schedule."
+            presentTemplateGuardNotice()
             return
         }
         task.dueAt = nil
         task.dueHasTime = false
+        tasksWithLabels[idx].0 = task
         do {
             try await taskUseCases.updateTask(task)
-            await NotificationsManager.cancelDueNotification(taskId: task.id)
-            await fetchTasks(in: nil, showLoading: false)
+            await refreshCounts()
+            await fetchTasks(in: nil)
         } catch {
-            errorMessage = "Failed to clear due date: \(error.localizedDescription)"
+            presentNotice(
+                tone: .danger,
+                title: "Schedule failed",
+                message: "Failed to clear due date: \(error.localizedDescription)"
+            )
+            Logger.shared.error("Failed to clear due date", category: .ui, error: error)
         }
     }
 
@@ -1337,5 +1425,59 @@ final class TaskListViewModel: ObservableObject {
         } catch {
             Logger.shared.error("Failed to reapply template field=\(field)", category: .ui, error: error)
         }
+    }
+
+    private func presentNotice(
+        tone: AlertTone,
+        title: String? = nil,
+        message: String,
+        primaryAction: AlertAction? = nil,
+        secondaryAction: AlertAction? = nil,
+        dismissible: Bool = true,
+        dismissHandler: (() -> Void)? = nil
+    ) {
+        notice = AlertNoticeModel(
+            tone: tone,
+            title: title,
+            message: message,
+            primaryAction: primaryAction,
+            secondaryAction: secondaryAction,
+            dismissible: dismissible,
+            dismissHandler: dismissible ? dismissHandler : nil
+        )
+    }
+
+    private func presentToast(
+        tone: AlertTone,
+        title: String? = nil,
+        message: String,
+        action: AlertAction? = nil,
+        duration: TimeInterval = 4.0,
+        dismissHandler: (() -> Void)? = nil
+    ) {
+        toast = AlertToastModel(
+            tone: tone,
+            title: title,
+            message: message,
+            action: action,
+            duration: duration,
+            dismissHandler: dismissHandler
+        )
+    }
+
+    private func clearNotice() {
+        notice = nil
+    }
+
+    private func clearToast() {
+        toast = nil
+    }
+
+    private func presentTemplateGuardNotice() {
+        presentNotice(
+            tone: .attention,
+            title: "Template schedule",
+            message: "Template tasks move automatically. Edit the template to change its schedule."
+        )
     }
 }
