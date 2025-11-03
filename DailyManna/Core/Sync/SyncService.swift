@@ -683,7 +683,7 @@ final class SyncService: ObservableObject {
                 }()
 
                 let bucketForOccurrence = computeTemplateBucketForDue(dueAt ?? dateOnly)
-                var child = Task(
+                let child = Task(
                     userId: userId,
                     bucketKey: bucketForOccurrence,
                     parentTaskId: parentId,
@@ -788,7 +788,7 @@ final class SyncService: ObservableObject {
 
                     // Generate instance and auto-bucket by due date
                     let bucketForInstance = computeTemplateBucketForDue(next)
-                    var newTask = Task(
+                    let newTask = Task(
                         userId: template.userId,
                         bucketKey: bucketForInstance,
                         parentTaskId: template.id,
