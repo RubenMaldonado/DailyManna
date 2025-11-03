@@ -161,6 +161,9 @@ struct TaskComposerView: View {
             .padding(.top, 8)
         }
         .padding()
+        #if os(macOS)
+        .frame(minWidth: 440, idealWidth: 480, maxWidth: 520)
+        #endif
         #if !os(macOS)
         .sheet(isPresented: $showDatePicker) {
             VStack(alignment: .leading, spacing: 16) {
@@ -251,6 +254,8 @@ struct TaskComposerView: View {
             // Focus title on present so users can type immediately
             #if os(iOS)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { isTitleFocused = true }
+            #elseif os(macOS)
+            DispatchQueue.main.async { isTitleFocused = true }
             #endif
         }
     }

@@ -131,6 +131,8 @@ final class AddTaskPanelController: NSObject, NSWindowDelegate {
         panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
         panel.isMovableByWindowBackground = true
         panel.delegate = self
+        panel.setContentSize(NSSize(width: 520, height: 420))
+        panel.minSize = NSSize(width: 520, height: 420)
         return panel
     }
 
