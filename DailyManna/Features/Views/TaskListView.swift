@@ -59,9 +59,7 @@ struct TaskListView: View {
         #else
         NavigationStack {
         VStack(spacing: 0) {
-            syncErrorBanner.typeErased()
-            pendingDeleteBanner.typeErased()
-            pendingCompleteForeverBanner.typeErased()
+            noticeStack.typeErased()
             // Bucket header removed in multi-bucket list mode
             activeFiltersRow.typeErased()
             contentSection.typeErased()
@@ -128,7 +126,8 @@ struct TaskListView: View {
                     _Concurrency.Task { await viewModel.save(draft: draft) }
                 } onCancel: {}
             } else {
-                let draft = viewModel.prefilledDraft ?? TaskDraft(userId: userId, bucket: .thisWeek)
+                let fallbackDraft = TaskDraft(userId: userId, bucket: viewModel.selectedBucket)
+                let draft = viewModel.prefilledDraft ?? fallbackDraft
                 TaskComposerView(draft: draft) { draft in
                     _Concurrency.Task { await viewModel.save(draft: draft) }
                 } onCancel: {}
@@ -229,13 +228,20 @@ struct TaskListView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if viewModel.snackbarIsPresented, let msg = viewModel.snackbarMessage {
-                Snackbar(message: msg, actionTitle: "Undo", duration: 4.0, isPresented: $viewModel.snackbarIsPresented) {
-                    _Concurrency.Task { await viewModel.undoLastCompletion() }
-                }
+            if let toast = viewModel.toast {
+                AlertToast(
+                    tone: toast.tone,
+                    title: toast.title,
+                    message: toast.message,
+                    action: toast.action,
+                    duration: toast.duration,
+                    isPresented: toastBinding,
+                    dismissAction: dismissToast
+                )
                 .padding(.bottom, 16)
+                .padding(.horizontal, 16)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
-                .animation(.easeInOut(duration: 0.2), value: viewModel.snackbarIsPresented)
+                .animation(.easeInOut(duration: 0.2), value: toast.id)
             }
         }
         #if os(macOS)
@@ -280,9 +286,6 @@ struct TaskListView: View {
     private var contentSection: some View {
         #if os(macOS)
         if currentViewMode == .board {
-            if let errorMessage = viewModel.errorMessage {
-                Banner(kind: .error, message: errorMessage).padding(.horizontal)
-            }
             HStack(spacing: 0) {
                 // Board side with its own header already rendered above
                 InlineBoardView(viewModel: viewModel)
@@ -299,9 +302,6 @@ struct TaskListView: View {
                 if viewModel.isLoading {
                     VStack(spacing: 12) { SkeletonTaskCard(); SkeletonTaskCard(); SkeletonTaskCard() }
                         .padding(.horizontal)
-                } else if let errorMessage = viewModel.errorMessage {
-                    Banner(kind: .error, message: errorMessage)
-                        .padding(.horizontal)
                 }
                 if workingLogVM.isOpen {
                     Divider()
@@ -317,9 +317,6 @@ struct TaskListView: View {
             // List content on the left
             if viewModel.isLoading {
                 VStack(spacing: 12) { SkeletonTaskCard(); SkeletonTaskCard(); SkeletonTaskCard() }
-                    .padding(.horizontal)
-            } else if let errorMessage = viewModel.errorMessage {
-                Banner(kind: .error, message: errorMessage)
                     .padding(.horizontal)
             } else if viewModel.tasksWithLabels.isEmpty {
                 EmptyStateView(bucketName: viewModel.selectedBucket.displayName)
@@ -351,60 +348,97 @@ private extension TaskListView {}
 // MARK: - Data loaders for filters
 private extension TaskListView {
     @ViewBuilder
-    var syncErrorBanner: some View {
-        if let syncError = viewModel.syncErrorMessage {
-            Banner(kind: .error, message: syncError)
-                .padding(.horizontal)
-                .padding(.top, 8)
-                .overlay(
-                    HStack {
-                        Spacer()
-                        Button("Retry") { _Concurrency.Task { await viewModel.sync() } }
-                            .buttonStyle(SecondaryButtonStyle(size: .small))
-                    }
-                    .padding(.trailing, 24)
-                )
+    var noticeStack: some View {
+        if hasNotices {
+            VStack(alignment: .leading, spacing: Spacing.xSmall) {
+                noticeView(viewModel.syncNotice) {
+                    viewModel.syncNotice?.dismissHandler?()
+                    viewModel.syncNotice = nil
+                }
+                noticeView(viewModel.notice) {
+                    viewModel.notice?.dismissHandler?()
+                    viewModel.notice = nil
+                }
+                pendingDeleteNotice
+                pendingCompleteForeverNotice
+            }
+            .padding(.horizontal)
+            .padding(.top, 8)
+        }
+    }
+
+    private var hasNotices: Bool {
+        viewModel.syncNotice != nil || viewModel.notice != nil || viewModel.pendingDelete != nil || viewModel.pendingCompleteForever != nil
+    }
+
+    @ViewBuilder
+    private func noticeView(_ model: AlertNoticeModel?, dismiss: @escaping () -> Void) -> some View {
+        if let model {
+            AlertNotice(
+                tone: model.tone,
+                title: model.title,
+                message: model.message,
+                primaryAction: model.primaryAction,
+                secondaryAction: model.secondaryAction,
+                dismissAction: model.dismissible ? {
+                    model.dismissHandler?()
+                    dismiss()
+                } : nil
+            )
+            .id(model.id)
         }
     }
 
     @ViewBuilder
-    var pendingDeleteBanner: some View {
-        if let t = viewModel.pendingDelete {
-            Banner(kind: .warning, message: "\"\(t.title)\" will be moved to trash.")
-                .padding(.horizontal)
-                .padding(.top, 8)
-                .overlay(
-                    HStack(spacing: 8) {
-                        Spacer()
-                        Button("Cancel") { viewModel.pendingDelete = nil }
-                            .buttonStyle(SecondaryButtonStyle(size: .small))
-                        Button("Delete", role: .destructive) { _Concurrency.Task { await viewModel.performDelete() } }
-                            .buttonStyle(PrimaryButtonStyle(size: .small))
-                    }
-                    .padding(.trailing, 24)
-                )
+    private var pendingDeleteNotice: some View {
+        if let task = viewModel.pendingDelete {
+            let cancel = AlertAction(title: "Cancel", kind: .secondary) { viewModel.pendingDelete = nil }
+            let confirm = AlertAction(title: "Delete", kind: .destructive) { _Concurrency.Task { await viewModel.performDelete() } }
+            AlertNotice(
+                tone: .warning,
+                title: "Delete \"\(task.title)\"?",
+                message: "\"\(task.title)\" will be moved to trash.",
+                primaryAction: confirm,
+                secondaryAction: cancel,
+                dismissAction: { viewModel.pendingDelete = nil }
+            )
         }
     }
 
     @ViewBuilder
-    var pendingCompleteForeverBanner: some View {
-        if let t = viewModel.pendingCompleteForever {
-            Banner(kind: .warning, message: "Complete Forever - \"\(t.title)\" will stop recurring and be marked complete. This action cannot be undone.")
-                .padding(.horizontal)
-                .padding(.top, 8)
-                .overlay(
-                    HStack(spacing: 8) {
-                        Spacer()
-                        Button("Cancel") { viewModel.pendingCompleteForever = nil }
-                            .buttonStyle(SecondaryButtonStyle(size: .small))
-                        Button("Complete Forever", role: .destructive) { _Concurrency.Task { await viewModel.performCompleteForever() } }
-                            .buttonStyle(PrimaryButtonStyle(size: .small))
-                    }
-                    .padding(.trailing, 24)
-                )
+    private var pendingCompleteForeverNotice: some View {
+        if let task = viewModel.pendingCompleteForever {
+            let cancel = AlertAction(title: "Cancel", kind: .secondary) { viewModel.pendingCompleteForever = nil }
+            let confirm = AlertAction(title: "Complete Forever", kind: .destructive) { _Concurrency.Task { await viewModel.performCompleteForever() } }
+            AlertNotice(
+                tone: .danger,
+                title: "Complete forever?",
+                message: "Complete Forever - \"\(task.title)\" will stop recurring and be marked complete. This action cannot be undone.",
+                primaryAction: confirm,
+                secondaryAction: cancel,
+                dismissAction: { viewModel.pendingCompleteForever = nil }
+            )
         }
     }
 
+    private var toastBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.toast != nil },
+            set: { isPresented in
+                if isPresented == false {
+                    dismissToast()
+                }
+            }
+        )
+    }
+
+    private func dismissToast() {
+        if let handler = viewModel.toast?.dismissHandler {
+            handler()
+        }
+        viewModel.toast = nil
+    }
+ 
     @ViewBuilder
     var headerBar: some View {
         VStack(alignment: .leading, spacing: 8) {

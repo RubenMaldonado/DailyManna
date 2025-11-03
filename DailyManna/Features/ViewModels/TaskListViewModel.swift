@@ -789,6 +789,7 @@ final class TaskListViewModel: ObservableObject {
     
     func presentCreateForm() {
         editingTask = nil
+        prefilledDraft = makeDraftForBucket(selectedBucket)
         isPresentingTaskForm = true
     }
 
@@ -907,7 +908,8 @@ final class TaskListViewModel: ObservableObject {
             draft.dueAt = cal.startOfDay(for: Date())
             draft.dueHasTime = false
         case .nextWeek:
-            draft.dueAt = WeekPlanner.nextMonday(after: Date())
+            let nextWeekDates = WeekPlanner.datesOfNextWeek(from: Date(), calendar: cal)
+            draft.dueAt = nextWeekDates.first.map { cal.startOfDay(for: $0) }
             draft.dueHasTime = false
         case .weekend:
             draft.dueAt = WeekPlanner.weekendAnchor(for: Date())
