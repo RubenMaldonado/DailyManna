@@ -78,32 +78,29 @@ final class AddTaskPanelController: NSObject, NSWindowDelegate {
     private func installObservers() {
         let center = NotificationCenter.default
         let labels = center.addObserver(forName: Notification.Name("dm.taskform.labels.selection"), object: nil, queue: .main) { [weak self] note in
-            guard let taskId = note.userInfo?["taskId"] as? UUID,
-                  let ids = note.userInfo?["labelIds"] as? [UUID] else { return }
-            Task { @MainActor [weak self] in
-                guard let self, taskId == self.currentDraftId else { return }
-                self.pendingLabelSelections[taskId] = Set(ids)
-            }
+            guard let self,
+                  let taskId = note.userInfo?["taskId"] as? UUID,
+                  let ids = note.userInfo?["labelIds"] as? [UUID],
+                  taskId == self.currentDraftId else { return }
+            self.pendingLabelSelections[taskId] = Set(ids)
         }
         observers.append(labels)
 
         let recurrence = center.addObserver(forName: Notification.Name("dm.taskform.recurrence.selection"), object: nil, queue: .main) { [weak self] note in
-            guard let taskId = note.userInfo?["taskId"] as? UUID,
+            guard let self,
+                  let taskId = note.userInfo?["taskId"] as? UUID,
+                  taskId == self.currentDraftId,
                   let data = note.userInfo?["ruleJSON"] as? Data,
                   let rule = try? JSONDecoder().decode(RecurrenceRule.self, from: data) else { return }
-            Task { @MainActor [weak self] in
-                guard let self, taskId == self.currentDraftId else { return }
-                self.pendingRecurrenceSelections[taskId] = rule
-            }
+            self.pendingRecurrenceSelections[taskId] = rule
         }
         observers.append(recurrence)
 
         let recurrenceClear = center.addObserver(forName: Notification.Name("dm.taskform.recurrence.clear"), object: nil, queue: .main) { [weak self] note in
-            guard let taskId = note.userInfo?["taskId"] as? UUID else { return }
-            Task { @MainActor [weak self] in
-                guard let self, taskId == self.currentDraftId else { return }
-                self.pendingRecurrenceSelections.removeValue(forKey: taskId)
-            }
+            guard let self,
+                  let taskId = note.userInfo?["taskId"] as? UUID,
+                  taskId == self.currentDraftId else { return }
+            self.pendingRecurrenceSelections.removeValue(forKey: taskId)
         }
         observers.append(recurrenceClear)
     }

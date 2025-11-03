@@ -30,7 +30,7 @@ struct BoardColumnsIOSView: View {
                 HStack(alignment: .top, spacing: Spacing.medium) {
                     // This Week
                     VStack(alignment: .leading, spacing: Spacing.xSmall) {
-                        BucketHeader(bucket: .thisWeek, count: count(for: .thisWeek)) { viewModel.presentCreateForm(bucket: .thisWeek) }
+                        BucketHeader(bucket: .thisWeek, count: count(for: .thisWeek), onAdd: { viewModel.presentCreateForm(bucket: .thisWeek) })
                         ThisWeekSectionsListView(
                             viewModel: viewModel,
                             onToggle: { task in _Concurrency.Task { await viewModel.toggleTaskCompletion(task: task) } },
@@ -49,7 +49,7 @@ struct BoardColumnsIOSView: View {
 
                     // Next Week
                     VStack(alignment: .leading, spacing: Spacing.xSmall) {
-                        BucketHeader(bucket: .nextWeek, count: count(for: .nextWeek)) { viewModel.presentCreateForm(bucket: .nextWeek) }
+                        BucketHeader(bucket: .nextWeek, count: count(for: .nextWeek), onAdd: { viewModel.presentCreateForm(bucket: .nextWeek) })
                         NextWeekSectionsListView(
                             viewModel: viewModel,
                             onToggle: { task in _Concurrency.Task { await viewModel.toggleTaskCompletion(task: task) } },
@@ -87,9 +87,7 @@ private struct StandardBucketColumn: View {
     let bucket: TimeBucket
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xSmall) {
-            BucketHeader(bucket: bucket, count: viewModel.tasksWithLabels.filter { $0.0.bucketKey == bucket && !$0.0.isCompleted }.count) {
-                viewModel.presentCreateForm(bucket: bucket)
-            }
+            BucketHeader(bucket: bucket, count: viewModel.tasksWithLabels.filter { $0.0.bucketKey == bucket && !$0.0.isCompleted }.count, onAdd: { viewModel.presentCreateForm(bucket: bucket) })
             // Hide ROUTINES roots; only show generated child occurrences. Sort by due/occurrence date.
             let pairs = viewModel.tasksWithLabels
                 .filter { t, _ in
