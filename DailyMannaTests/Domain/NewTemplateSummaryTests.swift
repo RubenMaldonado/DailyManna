@@ -2,6 +2,32 @@ import XCTest
 @testable import DailyManna
 
 final class NewTemplateSummaryTests: XCTestCase {
+    func testViewModelPersistsSelectedLabelsOnCreate() async throws {
+        let uid = UUID()
+        let vm = NewTemplateViewModel(userId: uid)
+        vm.name = "Weekly Review"
+        vm.selectedLabelIds = [UUID(), UUID()]
+        // Wire a local-only repo stack to avoid crashing on save; intercept create
+        let deps = Dependencies.shared
+        deps.reset()
+        try await MainActor.run { try? deps.configure() }
+        // Swap templates repository with an in-memory spy
+        class SpyTemplatesRepo: TemplatesRepository {
+            var lastCreated: Template? = nil
+            func list(ownerId: UUID) async throws -> [Template] { return [] }
+            func get(id: UUID, ownerId: UUID) async throws -> Template? { return nil }
+            func create(_ template: Template) async throws { lastCreated = template }
+            func update(_ template: Template) async throws {}
+            func delete(id: UUID, ownerId: UUID) async throws {}
+        }
+        let spy = SpyTemplatesRepo()
+        Dependencies.shared.registerSingleton(type: TemplatesRepository.self) { spy }
+        Dependencies.shared.registerSingleton(type: TemplatesUseCases.self) {
+            try! TemplatesUseCases(local: Dependencies.shared.resolve(type: TemplatesRepository.self))
+        }
+        await vm.save()
+        XCTAssertEqual(Set(spy.lastCreated?.labelsDefault ?? []), vm.selectedLabelIds)
+    }
     func testWeeklySummaryAndPreview() async throws {
         let uid = UUID()
         let vm = NewTemplateViewModel(userId: uid)

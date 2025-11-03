@@ -17,11 +17,12 @@ actor TemplatePropagationService {
         if old.labelsDefault != new.labelsDefault { changed.insert("labels") }
         if changed.isEmpty { return }
 
-        // Fetch all tasks for owner; filter by templateId, non-completed, occurrenceDate >= effectiveFrom
+        // Fetch all tasks for owner; filter by templateId, non-completed.
+        // Include ROUTINES root (parentTaskId == nil) in addition to dated children from today forward.
         guard let allTasks = try? await tasksRepo.fetchTasks(for: ownerId, in: nil) else { return }
-        let startOfDay = Calendar.current.startOfDay(for: effectiveFrom)
         let candidates = allTasks.filter { task in
-            task.templateId == new.id && task.isCompleted == false && (task.occurrenceDate ?? Date.distantPast) >= startOfDay
+            // Update every non-completed task that belongs to this template (root + all children)
+            task.templateId == new.id && task.isCompleted == false
         }
         for var task in candidates {
             // Respect exceptionMask per field

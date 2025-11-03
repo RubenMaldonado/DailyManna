@@ -75,6 +75,13 @@ final class SyncService: ObservableObject {
         return .thisWeek
     }
 
+    /// Specialized bucket assignment for template-generated tasks. Anything beyond next week stays in routines until it approaches.
+    private func computeTemplateBucketForDue(_ dueAt: Date, now: Date = Date()) -> TimeBucket {
+        let bucket = computeAutoBucketForDue(dueAt, now: now)
+        if bucket == .nextMonth { return .routines }
+        return bucket
+    }
+
     /// Updates the current view context used to trim remote deltas during sync
     func setViewContext(bucketKey: String?, dueBy: Date?) {
         currentViewContext = .init(bucketKey: bucketKey, dueBy: dueBy)
@@ -152,6 +159,10 @@ final class SyncService: ObservableObject {
                     _ = try await Logger.shared.time("seriesRoutinesGeneration") {
                         try await self.generateSeriesInstancesIfNeeded(userId: userId)
                     }
+                }
+                let moved = await rebucketTemplateOccurrencesIfNeeded(userId: userId)
+                if moved > 0 {
+                    Logger.shared.info("Template rebucket moved \(moved) tasks", category: .sync)
                 }
             }
 
@@ -610,82 +621,127 @@ final class SyncService: ObservableObject {
                 probe = next
             }
 
+            // Ensure we have (or create) the root task in routines for this template
+            let routinesTasks = try await localTasksRepository.fetchTasks(for: userId, in: .routines)
+            var root = routinesTasks.first { $0.parentTaskId == nil && $0.templateId == template.id && $0.deletedAt == nil }
+            if root == nil {
+                let pos = try await localTasksRepository.nextPositionForBottom(userId: userId, in: .routines)
+                let rootTask = Task(
+                    userId: userId,
+                    bucketKey: .routines,
+                    position: pos,
+                    parentTaskId: nil,
+                    templateId: template.id,
+                    seriesId: series.id,
+                    title: template.name,
+                    description: template.description,
+                    dueAt: nil,
+                    dueHasTime: false,
+                    occurrenceDate: nil,
+                    recurrenceRule: nil,
+                    priority: template.priority,
+                    reminders: nil,
+                    exceptionMask: nil,
+                    isCompleted: false
+                )
+                try await taskUC.createTask(rootTask)
+                root = rootTask
+                let labelIds = Set(template.labelsDefault)
+                if !labelIds.isEmpty { try? await taskUC.setLabels(for: rootTask.id, to: labelIds, userId: userId) }
+            }
+
+            var existingOccurrenceDates: Set<Date> = []
+            if let parentId = root?.id {
+                let existingChildren = try await localTasksRepository.fetchSubTasks(for: parentId)
+                existingOccurrenceDates = Set(existingChildren.compactMap { child in
+                    guard let occ = child.occurrenceDate else { return nil }
+                    return cal.startOfDay(for: occ)
+                })
+            }
+
             // Generate instances
             for dateOnly in occurrences {
-                // Find or create template root in ROUTINES (root has no due_at)
-                let routinesTasks = try await localTasksRepository.fetchTasks(for: userId, in: .routines)
-                var root = routinesTasks.first { $0.parentTaskId == nil && $0.templateId == template.id && $0.deletedAt == nil }
-                if root == nil {
-                    let pos = try await localTasksRepository.nextPositionForBottom(userId: userId, in: .routines)
-                    let rootTask = Task(
-                        userId: userId,
-                        bucketKey: .routines,
-                        position: pos,
-                        parentTaskId: nil,
-                        templateId: template.id,
-                        seriesId: series.id,
-                        title: template.name,
-                        description: template.description,
-                        dueAt: nil,
-                        dueHasTime: false,
-                        occurrenceDate: nil,
-                        recurrenceRule: nil,
-                        priority: template.priority,
-                        reminders: nil,
-                        exceptionMask: nil,
-                        isCompleted: false
-                    )
-                    try await taskUC.createTask(rootTask)
-                    root = rootTask
-                    let labelIds = Set(template.labelsDefault)
-                    if !labelIds.isEmpty { try? await taskUC.setLabels(for: rootTask.id, to: labelIds, userId: userId) }
-                }
+                guard let parentId = root?.id else { continue }
+                if existingOccurrenceDates.contains(dateOnly) { continue }
 
-                // If child occurrence for this date does not exist, create under root
-                let already = routinesTasks.contains { $0.seriesId == series.id && $0.occurrenceDate == dateOnly && $0.parentTaskId == root?.id && $0.deletedAt == nil }
-                if already == false, let parentId = root?.id {
-                    let childPos = try await localTasksRepository.nextSubtaskBottomPosition(parentTaskId: parentId)
-                    // Compose dueAt from dateOnly + template default time if provided, else rule.time
-                    let dueAt: Date? = {
-                        if let comps = template.defaultDueTime, let h = comps.hour, let m = comps.minute {
+                // Compose dueAt from dateOnly + template default time if provided, else rule.time
+                let dueAt: Date? = {
+                    if let comps = template.defaultDueTime, let h = comps.hour, let m = comps.minute {
+                        var full = cal.dateComponents([.year,.month,.day], from: dateOnly)
+                        full.hour = h; full.minute = m
+                        return cal.date(from: full)
+                    }
+                    if let t = rule.time {
+                        let parts = t.split(separator: ":")
+                        if parts.count == 2, let h = Int(parts[0]), let m = Int(parts[1]) {
                             var full = cal.dateComponents([.year,.month,.day], from: dateOnly)
                             full.hour = h; full.minute = m
                             return cal.date(from: full)
                         }
-                        if let t = rule.time {
-                            let parts = t.split(separator: ":")
-                            if parts.count == 2, let h = Int(parts[0]), let m = Int(parts[1]) {
-                                var full = cal.dateComponents([.year,.month,.day], from: dateOnly)
-                                full.hour = h; full.minute = m
-                                return cal.date(from: full)
-                            }
-                        }
-                        return dateOnly
-                    }()
-                    let child = Task(
-                        userId: userId,
-                        bucketKey: .routines,
-                        position: childPos,
-                        parentTaskId: parentId,
-                        templateId: template.id,
-                        seriesId: series.id,
-                        title: template.name,
-                        description: template.description,
-                        dueAt: dueAt,
-                        dueHasTime: dueAt != nil,
-                        occurrenceDate: dateOnly,
-                        recurrenceRule: nil,
-                        priority: template.priority,
-                        reminders: nil,
-                        exceptionMask: nil,
-                        isCompleted: false
-                    )
-                    try await taskUC.createTask(child)
-                    let labelIds = Set(template.labelsDefault)
-                    if !labelIds.isEmpty { try? await taskUC.setLabels(for: child.id, to: labelIds, userId: userId) }
+                    }
+                    return dateOnly
+                }()
+
+                let bucketForOccurrence = computeTemplateBucketForDue(dueAt ?? dateOnly)
+                var child = Task(
+                    userId: userId,
+                    bucketKey: bucketForOccurrence,
+                    parentTaskId: parentId,
+                    templateId: template.id,
+                    seriesId: series.id,
+                    title: template.name,
+                    description: template.description,
+                    dueAt: dueAt,
+                    dueHasTime: dueAt != nil,
+                    occurrenceDate: dateOnly,
+                    recurrenceRule: nil,
+                    priority: template.priority,
+                    reminders: nil,
+                    exceptionMask: nil,
+                    isCompleted: false
+                )
+                try await taskUC.createTask(child)
+                let labelIds = Set(template.labelsDefault)
+                if !labelIds.isEmpty { try? await taskUC.setLabels(for: child.id, to: labelIds, userId: userId) }
+                if let due = child.dueAt {
+                    await NotificationsManager.scheduleDueNotification(taskId: child.id, title: child.title, dueAt: due, bucketKey: child.bucketKey.rawValue)
                 }
+                existingOccurrenceDates.insert(dateOnly)
             }
         }
+    }
+
+    /// Ensures template-generated occurrences live in the correct bucket based on their scheduled date.
+    func rebucketTemplateOccurrencesIfNeeded(userId: UUID) async -> Int {
+        var movedCount = 0
+        do {
+            let deps = Dependencies.shared
+            let taskUC = try TaskUseCases(
+                tasksRepository: deps.resolve(type: TasksRepository.self),
+                labelsRepository: deps.resolve(type: LabelsRepository.self)
+            )
+            let allTasks = try await localTasksRepository.fetchTasks(for: userId, in: nil)
+            for task in allTasks {
+                guard task.deletedAt == nil,
+                      task.isCompleted == false,
+                      task.parentTaskId != nil,
+                      task.templateId != nil else { continue }
+                if let mask = task.exceptionMask, mask.contains("bucket") { continue }
+                guard let anchor = task.dueAt ?? task.occurrenceDate else { continue }
+                let desiredBucket = computeTemplateBucketForDue(anchor)
+                if desiredBucket == task.bucketKey { continue }
+                do {
+                    let newPosition = try await localTasksRepository.nextPositionForBottom(userId: userId, in: desiredBucket)
+                    try await taskUC.updateTaskOrderAndBucket(id: task.id, to: desiredBucket, position: newPosition, userId: userId, allowTemplateBucketMutation: true)
+                    movedCount += 1
+                } catch {
+                    Logger.shared.error("Template rebucket failed for task=\(task.id)", category: .sync, error: error)
+                }
+            }
+        } catch {
+            Logger.shared.error("Template rebucket scan failed", category: .sync, error: error)
+        }
+        return movedCount
     }
 
     // MARK: - Recurrences (pull-only v1; app creates/updates eagerly)
@@ -711,6 +767,7 @@ final class SyncService: ObservableObject {
                 labelsRepository: deps.resolve(type: LabelsRepository.self)
             )
             let recurrences = try await recUC.list(for: userId)
+            let cal = Calendar.current
             for rec in recurrences where rec.status == "active" {
                 guard let next = rec.nextScheduledAt, next <= Date() else { continue }
                 // Load template task and labels
@@ -730,8 +787,17 @@ final class SyncService: ObservableObject {
                     }
 
                     // Generate instance and auto-bucket by due date
-                    let instanceBucket = computeAutoBucketForDue(next)
-                    let newTask = Task(userId: template.userId, bucketKey: instanceBucket, parentTaskId: template.id, title: template.title, description: template.description, dueAt: next)
+                    let bucketForInstance = computeTemplateBucketForDue(next)
+                    var newTask = Task(
+                        userId: template.userId,
+                        bucketKey: bucketForInstance,
+                        parentTaskId: template.id,
+                        title: template.title,
+                        description: template.description,
+                        dueAt: next,
+                        dueHasTime: true,
+                        occurrenceDate: cal.startOfDay(for: next)
+                    )
                     try await taskUC.createTask(newTask)
                     let labelIds = Set(labels.map { $0.id })
                     try await taskUC.setLabels(for: newTask.id, to: labelIds, userId: userId)

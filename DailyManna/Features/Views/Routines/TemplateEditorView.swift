@@ -10,6 +10,8 @@ struct TemplateEditorView: View {
     @State var weeklyInterval: Int = 1
     @State var anchorWeekday: Int = Calendar.current.component(.weekday, from: Date())
     @Environment(\.dismiss) private var dismiss
+    @State private var showLabels: Bool = false
+    @State private var selectedLabels: Set<UUID> = []
 
     var body: some View {
         NavigationView {
@@ -26,6 +28,15 @@ struct TemplateEditorView: View {
                         Text("High").tag(TaskPriority.high)
                     }
                     TextField("End after N occurrences (optional)", text: $endAfterCount)
+                    HStack {
+                        Text("Labels")
+                        Spacer()
+                        Button(labelsChipText()) { showLabels = true }
+                    }
+                    .popover(isPresented: $showLabels) {
+                        LabelMultiSelectSheet(userId: userId, selected: $selectedLabels)
+                            .frame(width: 340, height: 420)
+                    }
                 }
                 Section(header: Text("Recurrence")) {
                     Stepper(value: $weeklyInterval, in: 1...8) { Text("Every \(weeklyInterval) week(s)") }
@@ -76,7 +87,7 @@ struct TemplateEditorView: View {
     private func save() async {
         guard name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else { return }
         let comps = Calendar.current.dateComponents([.hour,.minute], from: defaultTime)
-        let tpl = Template(ownerId: userId, name: name, description: descriptionText, defaultDueTime: comps, priority: priority, status: "active", endAfterCount: Int(endAfterCount))
+        let tpl = Template(ownerId: userId, name: name, description: descriptionText, labelsDefault: Array(selectedLabels), defaultDueTime: comps, priority: priority, status: "active", endAfterCount: Int(endAfterCount))
         do {
             let deps = Dependencies.shared
             let tplUC = try deps.resolve(type: TemplatesUseCases.self)
@@ -105,6 +116,14 @@ private extension DateFormatter {
         f.timeStyle = .none
         return f
     }()
+}
+
+private extension TemplateEditorView {
+    func labelsChipText() -> String {
+        if selectedLabels.isEmpty { return "Select" }
+        let extra = selectedLabels.count - 1
+        return extra > 0 ? "1 +\(extra)" : "1"
+    }
 }
 
 

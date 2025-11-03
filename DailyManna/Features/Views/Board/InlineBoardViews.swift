@@ -2,6 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 #if os(macOS)
+private enum ColumnWidthMode: String, Codable { case expanded, compact, rail }
 private enum BoardMetrics {
     static func columnWidth(for containerWidth: CGFloat) -> CGFloat {
         let minW: CGFloat = 360
@@ -19,19 +20,41 @@ private enum BoardMetrics {
         let ideal = floor((containerWidth - gutters - 32) / targetCols)
         return min(maxW, max(minW, ideal))
     }
+    static let expandedWidth: CGFloat = 360
+    static let compactWidth: CGFloat = 260
+    static let railWidth: CGFloat = 56
 }
 struct InlineBoardView: View {
     @ObservedObject var viewModel: TaskListViewModel
     @StateObject private var templatesVM = TemplatesListViewModel()
     @State private var templatesCollapsed: Bool = false
     private var buckets: [TimeBucket] { TimeBucket.allCases.sorted { $0.sortOrder < $1.sortOrder } }
+    @State private var preferredModeByBucket: [String: String] = [:]
+    @State private var lastNonRailByBucket: [String: String] = [:]
+    @State private var userWidthByBucket: [String: CGFloat] = [:]
+    @State private var resizingBucketKey: String? = nil
+    @State private var cachedEffectiveByBucket: [String: String] = [:]
     var body: some View {
         GeometryReader { geo in
         let colWidth = BoardMetrics.columnWidth(for: geo.size.width)
+        let computed = effectiveModes(containerWidth: geo.size.width, baseColumnWidth: colWidth)
+        let usingCached = (resizingBucketKey != nil && cachedEffectiveByBucket.isEmpty == false)
+        let effective = usingCached ? cachedEffectiveByBucket : computed
         ScrollView(.horizontal) {
             HStack(spacing: Spacing.medium) {
-                ForEach(buckets, id: \.rawValue) { (bucket: TimeBucket) in
-                    if bucket == .thisWeek && viewModel.featureThisWeekSectionsEnabled {
+                let visibleBuckets: [TimeBucket] = buckets.filter { effective[$0.rawValue] != nil }
+                ForEach(Array(visibleBuckets.enumerated()), id: \.element.rawValue) { (index, bucket) in
+                    let key = bucket.rawValue
+                    Group {
+                        if let mode = effective[key], mode == "rail" {
+                            BucketRailView(
+                                bucket: bucket,
+                                count: viewModel.tasksWithLabels.filter { $0.0.bucketKey == bucket }.count,
+                                onExpand: { setPreferredMode(bucket, to: lastNonRail(bucket)) }
+                            )
+                        } else {
+                    let chosenWidth: CGFloat = widthFor(bucket: bucket, effectiveMode: effective[key])
+                            if bucket == .thisWeek && viewModel.featureThisWeekSectionsEnabled {
                         InlineThisWeekColumn(
                             tasksWithLabels: viewModel.tasksWithLabels.filter { $0.0.bucketKey == .thisWeek },
                             subtaskProgressByParent: viewModel.subtaskProgressByParent,
@@ -51,10 +74,14 @@ struct InlineBoardView: View {
                             onAdd: {
                                 viewModel.presentCreateForm(bucket: .thisWeek)
                             },
-                            columnWidth: colWidth
+                            onCycleWidthMode: { cycleMode(bucket) },
+                            onToggleHeader: { cycleCompactExpanded(for: bucket) },
+                            onCollapseToRail: { collapseToRail(bucket) },
+                            onExpandAll: { expandAllBuckets() },
+                            onCollapseRight: { collapseRight(of: bucket) },
+                            columnWidth: chosenWidth
                         )
-                        .id(bucket.rawValue)
-                    } else if bucket == .nextWeek && viewModel.featureNextWeekSectionsEnabled {
+                            } else if bucket == .nextWeek && viewModel.featureNextWeekSectionsEnabled {
                         InlineNextWeekColumn(
                             tasksWithLabels: viewModel.tasksWithLabels.filter { $0.0.bucketKey == .nextWeek },
                             subtaskProgressByParent: viewModel.subtaskProgressByParent,
@@ -74,10 +101,14 @@ struct InlineBoardView: View {
                             onAdd: {
                                 viewModel.presentCreateForm(bucket: .nextWeek)
                             },
-                            columnWidth: colWidth
+                            onCycleWidthMode: { cycleMode(bucket) },
+                            onToggleHeader: { cycleCompactExpanded(for: bucket) },
+                            onCollapseToRail: { collapseToRail(bucket) },
+                            onExpandAll: { expandAllBuckets() },
+                            onCollapseRight: { collapseRight(of: bucket) },
+                            columnWidth: chosenWidth
                         )
-                        .id(bucket.rawValue)
-                    } else if bucket == .routines {
+                            } else if bucket == .routines {
                         // Routines column with Templates section (macOS)
                         VStack(alignment: .leading, spacing: Spacing.xSmall) {
                             // Templates
@@ -141,21 +172,25 @@ struct InlineBoardView: View {
                                 onGenerateNow: { id in _Concurrency.Task { await viewModel.generateNow(taskId: id) } },
                                 onToggleLabel: { taskId, labelId in viewModel.toggleLabel(taskId: taskId, labelId: labelId) },
                                 onSetLabels: { taskId, desired in _Concurrency.Task { await viewModel.setLabels(taskId: taskId, to: desired) } },
-                                columnWidth: colWidth
+                                onCycleWidthMode: { cycleMode(bucket) },
+                                onToggleHeader: { cycleCompactExpanded(for: bucket) },
+                                onCollapseToRail: { collapseToRail(bucket) },
+                                onExpandAll: { expandAllBuckets() },
+                                onCollapseRight: { collapseRight(of: bucket) },
+                                columnWidth: chosenWidth
                             )
                         }
                         .padding(.vertical, Spacing.small)
                         .surfaceStyle(.content)
                         .cornerRadius(12)
-                        .frame(width: colWidth)
+                        .frame(width: chosenWidth)
                         .task { await templatesVM.load(userId: viewModel.userId) }
                         .sheet(isPresented: $templatesVM.isPresentingEditor) {
                             let tpl = templatesVM.editingTemplate
                             let series = tpl.flatMap { templatesVM.seriesByTemplateId[$0.id] }
                             NewTemplateView(userId: viewModel.userId, editing: tpl, series: series)
                         }
-                        .id(bucket.rawValue)
-                    } else {
+                            } else {
                         InlineStandardBucketColumn(
                             bucket: bucket,
                             tasksWithLabels: viewModel.tasksWithLabels.filter { $0.0.bucketKey == bucket },
@@ -198,20 +233,231 @@ struct InlineBoardView: View {
                             onGenerateNow: { id in _Concurrency.Task { await viewModel.generateNow(taskId: id) } },
                             onToggleLabel: { taskId, labelId in viewModel.toggleLabel(taskId: taskId, labelId: labelId) },
                             onSetLabels: { taskId, desired in _Concurrency.Task { await viewModel.setLabels(taskId: taskId, to: desired) } },
-                            columnWidth: colWidth
+                            onCycleWidthMode: { cycleMode(bucket) },
+                            onToggleHeader: { cycleCompactExpanded(for: bucket) },
+                            onCollapseToRail: { collapseToRail(bucket) },
+                            onExpandAll: { expandAllBuckets() },
+                            onCollapseRight: { collapseRight(of: bucket) },
+                            columnWidth: chosenWidth
                         )
-                        .id(bucket.rawValue)
+                        }
+                        // Add resize handle after every column, including the last one,
+                        // so users can resize the trailing column (e.g., Routines/Templates)
+                        ColumnResizeHandle(
+                            onBegin: { cachedEffectiveByBucket = computed; resizingBucketKey = bucket.rawValue },
+                            onDrag: { delta in withAnimation(.interactiveSpring(response: 0.25, dampingFraction: 0.88)) { adjustWidth(for: bucket, by: delta) } },
+                            onEnd: { withAnimation(.easeOut(duration: 0.18)) { persistUserWidth(for: bucket); resizingBucketKey = nil; cachedEffectiveByBucket = computed } }
+                        )
+                        }
                     }
+                    .id(key)
                 }
             }
             .padding()
             .frame(maxHeight: .infinity, alignment: .top)
-            .transaction { txn in txn.disablesAnimations = true }
+        .transaction { txn in
+            // Keep list interactions snappy but allow width changes to animate smoothly
+            if resizingBucketKey == nil { txn.disablesAnimations = true }
+        }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .onChange(of: resizingBucketKey) { _, newValue in
+            if newValue == nil { DispatchQueue.main.async { cachedEffectiveByBucket = computed } }
+        }
+        .onChange(of: geo.size.width) { _, _ in
+            if resizingBucketKey == nil { DispatchQueue.main.async { cachedEffectiveByBucket = effectiveModes(containerWidth: geo.size.width, baseColumnWidth: colWidth) } }
+        }
         }
     }
 }
+#if os(macOS)
+// MARK: - Width mode helpers (macOS only)
+extension InlineBoardView {
+    private func keyFor(_ bucket: TimeBucket) -> String { "board.widthMode.\(bucket.rawValue)" }
+    private func keyLastNonRail(_ bucket: TimeBucket) -> String { "board.lastNonRail.\(bucket.rawValue)" }
+    private func preferredMode(_ bucket: TimeBucket) -> String {
+        if let mode = preferredModeByBucket[bucket.rawValue] { return mode }
+        if let raw = UserDefaults.standard.string(forKey: keyFor(bucket)) { return raw }
+        return "expanded"
+    }
+    private func setPreferredMode(_ bucket: TimeBucket, to mode: String) {
+        preferredModeByBucket[bucket.rawValue] = mode
+        UserDefaults.standard.set(mode, forKey: keyFor(bucket))
+        if mode != "rail" {
+            lastNonRailByBucket[bucket.rawValue] = mode
+            UserDefaults.standard.set(mode, forKey: keyLastNonRail(bucket))
+        }
+    }
+    private func cycleMode(_ bucket: TimeBucket) {
+        let current = preferredMode(bucket)
+        let next: String = (current == "expanded") ? "compact" : (current == "compact" ? "rail" : "expanded")
+        setPreferredMode(bucket, to: next)
+    }
+    private func cycleCompactExpanded(for bucket: TimeBucket) {
+        let current = preferredMode(bucket)
+        let next: String = (current == "expanded") ? "compact" : "expanded"
+        setPreferredMode(bucket, to: next)
+    }
+    private func lastNonRail(_ bucket: TimeBucket) -> String {
+        if let v = lastNonRailByBucket[bucket.rawValue] { return v }
+        if let raw = UserDefaults.standard.string(forKey: keyLastNonRail(bucket)) { return raw }
+        return "expanded"
+    }
+    private func collapseToRail(_ bucket: TimeBucket) {
+        setPreferredMode(bucket, to: "rail")
+    }
+    private func expandAllBuckets() {
+        for b in buckets { setPreferredMode(b, to: "expanded") }
+    }
+    private func collapseRight(of bucket: TimeBucket) {
+        guard let idx = buckets.firstIndex(of: bucket) else { return }
+        for i in (idx+1)..<buckets.count { setPreferredMode(buckets[i], to: "rail") }
+    }
+    private func effectiveModes(containerWidth: CGFloat, baseColumnWidth: CGFloat) -> [String: String] {
+        let gutter: CGFloat = Spacing.medium
+        var modes: [String: String] = [:]
+        for b in buckets { modes[b.rawValue] = preferredMode(b) }
+        func width(for mode: String) -> CGFloat {
+            switch mode {
+            case "expanded": return BoardMetrics.expandedWidth
+            case "compact": return BoardMetrics.compactWidth
+            case "rail": return BoardMetrics.railWidth
+            default: return BoardMetrics.expandedWidth
+            }
+        }
+        func totalWidth() -> CGFloat {
+            let visible = buckets.compactMap { modes[$0.rawValue] }
+            if visible.isEmpty { return 0 }
+            let sum = visible.map { width(for: $0) }.reduce(0, +)
+            let gutters = gutter * CGFloat(max(visible.count - 1, 0))
+            let padding: CGFloat = 32
+            return sum + gutters + padding
+        }
+        var idx = buckets.count - 1
+        while totalWidth() > containerWidth && idx >= 0 {
+            let b = buckets[idx]
+            if let m = modes[b.rawValue] {
+                if m == "expanded" { modes[b.rawValue] = "compact" }
+                else if m == "compact" { modes[b.rawValue] = "rail" }
+            }
+            if idx > 0 { idx -= 1 } else { break }
+        }
+        idx = buckets.count - 1
+        while totalWidth() > containerWidth && idx >= 1 { // keep at least one visible
+            let b = buckets[idx]
+            modes[b.rawValue] = nil
+            if idx > 1 { idx -= 1 } else { break }
+        }
+        return modes
+    }
+    private func defaultWidth(for mode: String?) -> CGFloat {
+        switch mode {
+        case "compact": return BoardMetrics.compactWidth
+        case "rail": return BoardMetrics.railWidth
+        default: return BoardMetrics.expandedWidth
+        }
+    }
+    private func widthFor(bucket: TimeBucket, effectiveMode: String?) -> CGFloat {
+        let key = bucket.rawValue
+        // Prefer in-memory width while dragging or after prior adjustments
+        if let w = userWidthByBucket[key] { return max(220, min(560, w)) }
+        // Otherwise, read persisted width without mutating state during render
+        if let saved = loadUserWidth(for: bucket) { return max(220, min(560, saved)) }
+        return defaultWidth(for: effectiveMode)
+    }
+    private func adjustWidth(for bucket: TimeBucket, by delta: CGFloat) {
+        let key = bucket.rawValue
+        let current = userWidthByBucket[key] ?? defaultWidth(for: preferredMode(bucket))
+        userWidthByBucket[key] = max(220, min(560, current + delta))
+    }
+    private func persistUserWidth(for bucket: TimeBucket) {
+        let key = bucket.rawValue
+        if let w = userWidthByBucket[key] { UserDefaults.standard.set(Double(w), forKey: "board.userWidth.\(key)") }
+    }
+    private func loadUserWidth(for bucket: TimeBucket) -> CGFloat? {
+        let key = bucket.rawValue
+        if let v = UserDefaults.standard.object(forKey: "board.userWidth.\(key)") as? NSNumber { return CGFloat(truncating: v) }
+        return nil
+    }
+}
+#endif
+
+#if os(macOS)
+// MARK: - Rail view (macOS only)
+private struct BucketRailView: View {
+    let bucket: TimeBucket
+    let count: Int
+    let onExpand: () -> Void
+    var body: some View {
+        VStack(spacing: 10) {
+            Button(action: onExpand) { Image(systemName: "rectangle.leftthird.inset.filled") }
+                .buttonStyle(.plain)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+                .accessibilityLabel("Expand \(bucket.displayName)")
+            ZStack {
+                // Flip full name to read bottom-to-top when collapsed; keep same size as header
+                Text(bucket.displayName)
+                    .style(Typography.title3)
+                    .foregroundColor(Colors.onSurface)
+                    .rotationEffect(.degrees(90))
+                    .fixedSize()
+            }
+            .frame(maxHeight: .infinity, alignment: .center)
+            .padding(.vertical, 4)
+            CountBadge(count: count, tint: Colors.color(for: bucket))
+        }
+        .onTapGesture(count: 2) { onExpand() }
+        .padding(.vertical, Spacing.small)
+        .frame(width: BoardMetrics.railWidth)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .surfaceStyle(.content)
+        .cornerRadius(12)
+        .help("\(bucket.displayName): \(count) tasks")
+    }
+    // No longer stacking letters; we rotate the full display name instead
+}
+#endif
+
+#if os(macOS)
+// MARK: - Column Resize Handle (hover-only, accent on hover)
+private struct ColumnResizeHandle: View {
+    let onBegin: () -> Void
+    let onDrag: (CGFloat) -> Void
+    let onEnd: () -> Void
+    @State private var isHovering: Bool = false
+    @State private var lastX: CGFloat = 0
+    var body: some View {
+        Rectangle()
+            .fill(isHovering ? Colors.primary : Colors.onSurface.opacity(0.04))
+            .frame(width: 8)
+            .overlay(
+                Capsule()
+                    .fill(isHovering ? Colors.primary : Colors.onSurface.opacity(0.18))
+                    .frame(width: 4, height: 36)
+                    .opacity(isHovering ? 1 : 0)
+                    .animation(.easeOut(duration: 0.15), value: isHovering)
+            )
+            .onHover { isHovering = $0 }
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        onBegin()
+                        let delta = value.translation.width - lastX
+                        lastX = value.translation.width
+                        onDrag(delta)
+                    }
+                    .onEnded { _ in
+                        lastX = 0
+                        onEnd()
+                    }
+            )
+            .onTapGesture(count: 2) { onBegin(); withAnimation(.easeInOut(duration: 0.18)) { /* no-op here; header handles toggle via onTogglePrimary */ } ; onEnd() }
+            .overlay(Rectangle().fill(Colors.onSurface.opacity(isHovering ? 0.28 : 0.12)).frame(width: 1), alignment: .center)
+            .help("Drag to resize column")
+    }
+}
+#endif
 
 struct InlineStandardBucketColumn: View {
     let bucket: TimeBucket
@@ -229,6 +475,11 @@ struct InlineStandardBucketColumn: View {
     let onGenerateNow: (UUID) -> Void
     let onToggleLabel: (UUID, UUID) -> Void
     let onSetLabels: (UUID, Set<UUID>) -> Void
+    let onCycleWidthMode: () -> Void
+    let onToggleHeader: () -> Void
+    let onCollapseToRail: () -> Void
+    let onExpandAll: () -> Void
+    let onCollapseRight: () -> Void
     let columnWidth: CGFloat
     @State private var rowFrames: [UUID: CGRect] = [:]
     @State private var isDragActive: Bool = false
@@ -240,7 +491,12 @@ struct InlineStandardBucketColumn: View {
     @State private var selectedLabelIdsForSheet: Set<UUID> = []
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xSmall) {
-            BucketHeader(bucket: bucket, count: tasksWithLabels.count, onAdd: onAdd)
+            BucketHeader(bucket: bucket, count: tasksWithLabels.count, onAdd: onAdd, onCycleWidthMode: onCycleWidthMode, onTogglePrimary: onToggleHeader)
+                .contextMenu {
+                    Button("Collapse to Rail") { onCollapseToRail() }
+                    Button("Expand All Buckets") { onExpandAll() }
+                    Button("Collapse Right of This") { onCollapseRight() }
+                }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.xSmall) {
                     ForEach(tasksWithLabels, id: \.0.id) { pair in
@@ -372,13 +628,23 @@ struct InlineThisWeekColumn: View {
     let onGenerateNow: (UUID) -> Void
     let onCompleteForever: (Task) -> Void
     let onAdd: () -> Void
+    let onCycleWidthMode: () -> Void
+    let onToggleHeader: () -> Void
+    let onCollapseToRail: () -> Void
+    let onExpandAll: () -> Void
+    let onCollapseRight: () -> Void
     let columnWidth: CGFloat
 
     private var sections: [WeekdaySection] { WeekPlanner.buildSections(for: Date()) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xSmall) {
-            BucketHeader(bucket: .thisWeek, count: tasksWithLabels.count, onAdd: onAdd)
+            BucketHeader(bucket: .thisWeek, count: tasksWithLabels.count, onAdd: onAdd, onCycleWidthMode: onCycleWidthMode, onTogglePrimary: onToggleHeader)
+                .contextMenu {
+                    Button("Collapse to Rail") { onCollapseToRail() }
+                    Button("Expand All Buckets") { onExpandAll() }
+                    Button("Collapse Right of This") { onCollapseRight() }
+                }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.small) {
                     ForEach(sections, id: \.id) { section in
@@ -623,13 +889,23 @@ struct InlineNextWeekColumn: View {
     let onGenerateNow: (UUID) -> Void
     let onCompleteForever: (Task) -> Void
     let onAdd: () -> Void
+    let onCycleWidthMode: () -> Void
+    let onToggleHeader: () -> Void
+    let onCollapseToRail: () -> Void
+    let onExpandAll: () -> Void
+    let onCollapseRight: () -> Void
     let columnWidth: CGFloat
 
     private var sections: [WeekdaySection] { WeekPlanner.buildNextWeekSections(for: Date()) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xSmall) {
-            BucketHeader(bucket: .nextWeek, count: tasksWithLabels.count, onAdd: onAdd)
+            BucketHeader(bucket: .nextWeek, count: tasksWithLabels.count, onAdd: onAdd, onCycleWidthMode: onCycleWidthMode, onTogglePrimary: onToggleHeader)
+                .contextMenu {
+                    Button("Collapse to Rail") { onCollapseToRail() }
+                    Button("Expand All Buckets") { onExpandAll() }
+                    Button("Collapse Right of This") { onCollapseRight() }
+                }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.small) {
                     ForEach(sections, id: \.id) { section in
@@ -898,6 +1174,11 @@ struct BoardRowFramePreferenceKey: PreferenceKey {
         onGenerateNow: {_ in},
         onToggleLabel: {_,_ in},
         onSetLabels: {_,_ in},
+        onCycleWidthMode: {},
+        onToggleHeader: {},
+        onCollapseToRail: {},
+        onExpandAll: {},
+        onCollapseRight: {},
         columnWidth: 420
     )
     .background(Colors.background)

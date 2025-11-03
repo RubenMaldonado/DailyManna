@@ -132,6 +132,75 @@ final class SyncServiceTests: XCTestCase {
         XCTAssertEqual(total, 2)
         XCTAssertEqual(completed, 1)
     }
+
+    func testTemplateRebucketMovesOccurrences() async throws {
+        Dependencies.shared.reset()
+        let data = try DataContainer.test()
+        let localTasks = data.tasksRepository
+        let localLabels = data.labelsRepository
+        Dependencies.shared.registerSingleton(type: TasksRepository.self) { localTasks }
+        Dependencies.shared.registerSingleton(type: LabelsRepository.self) { localLabels }
+
+        let sync = SyncService(
+            localTasksRepository: localTasks,
+            remoteTasksRepository: FakeRemoteTasksRepository(),
+            localLabelsRepository: localLabels,
+            remoteLabelsRepository: FakeRemoteLabelsRepository(),
+            syncStateStore: data.syncStateStore,
+            localWorkingLogRepository: data.workingLogRepository,
+            remoteWorkingLogRepository: FakeRemoteWorkingLogRepository()
+        )
+
+        defer { Dependencies.shared.reset() }
+
+        let userId = TestFactories.userId(80)
+        let templateId = UUID()
+        var root = TestFactories.task(id: templateId, userId: userId, bucket: .routines, title: "Template Root")
+        root.templateId = templateId
+        root.parentTaskId = nil
+        root.dueAt = nil
+        root.dueHasTime = false
+        try await localTasks.createTask(root)
+
+        let cal = Calendar.current
+        let now = Date()
+        let nextMonday = WeekPlanner.nextMonday(after: now)
+        var nextWeekChild = TestFactories.task(userId: userId, bucket: .routines, title: "Next Week Occurrence")
+        nextWeekChild.templateId = templateId
+        nextWeekChild.parentTaskId = templateId
+        nextWeekChild.dueAt = nextMonday
+        nextWeekChild.occurrenceDate = nextMonday
+        try await localTasks.createTask(nextWeekChild)
+
+        let thisWeekMonday = WeekPlanner.mondayOfCurrentWeek(for: now, calendar: cal)
+        let thisWeekDue = cal.date(byAdding: .day, value: 2, to: thisWeekMonday) ?? thisWeekMonday
+        var thisWeekChild = TestFactories.task(userId: userId, bucket: .routines, title: "This Week Occurrence")
+        thisWeekChild.templateId = templateId
+        thisWeekChild.parentTaskId = templateId
+        thisWeekChild.dueAt = thisWeekDue
+        thisWeekChild.occurrenceDate = cal.startOfDay(for: thisWeekDue)
+        try await localTasks.createTask(thisWeekChild)
+
+        let futureDue = cal.date(byAdding: .day, value: 20, to: now) ?? now
+        var futureChild = TestFactories.task(userId: userId, bucket: .routines, title: "Future Occurrence")
+        futureChild.templateId = templateId
+        futureChild.parentTaskId = templateId
+        futureChild.dueAt = futureDue
+        futureChild.occurrenceDate = cal.startOfDay(for: futureDue)
+        try await localTasks.createTask(futureChild)
+
+        let moved = await sync.rebucketTemplateOccurrencesIfNeeded(userId: userId)
+        XCTAssertEqual(moved, 2)
+
+        let refreshedNextWeek = try await localTasks.fetchTask(by: nextWeekChild.id)
+        XCTAssertEqual(refreshedNextWeek?.bucketKey, .nextWeek)
+
+        let refreshedThisWeek = try await localTasks.fetchTask(by: thisWeekChild.id)
+        XCTAssertEqual(refreshedThisWeek?.bucketKey, .thisWeek)
+
+        let refreshedFuture = try await localTasks.fetchTask(by: futureChild.id)
+        XCTAssertEqual(refreshedFuture?.bucketKey, .routines)
+    }
 }
 
 

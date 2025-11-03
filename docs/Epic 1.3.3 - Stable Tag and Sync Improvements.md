@@ -20,6 +20,10 @@
    - Pause sync triggers offline; catch up immediately on reconnect.
 
 4) Paginated delta pulls (supporting both)
+
+### Added in this epic
+
+- Templates can now define default labels. When you create or edit a template, use the new Labels selector. Generated ROUTINES root and instances inherit these labels, and future instances update if the template defaults change.
    - Robust bootstrap and large-delta handling without memory spikes.
 
 ### Verification

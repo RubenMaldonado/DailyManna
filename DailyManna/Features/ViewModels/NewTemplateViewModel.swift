@@ -12,6 +12,7 @@ final class NewTemplateViewModel: ObservableObject {
     @Published var descriptionText: String = ""
     @Published var priority: TaskPriority = .normal
     @Published var defaultTime: Date = Calendar.current.date(bySettingHour: 17, minute: 0, second: 0, of: Date()) ?? Date()
+    @Published var selectedLabelIds: Set<UUID> = []
     
     // End rules
     enum EndRule: Equatable { case never, onDate(Date), afterCount(Int) }
@@ -58,6 +59,7 @@ final class NewTemplateViewModel: ObservableObject {
             name = tpl.name
             descriptionText = tpl.description ?? ""
             priority = tpl.priority
+            selectedLabelIds = Set(tpl.labelsDefault)
             if let comps = tpl.defaultDueTime, let h = comps.hour, let m = comps.minute,
                let d = Calendar.current.date(bySettingHour: h, minute: m, second: 0, of: Date()) {
                 defaultTime = d
@@ -146,6 +148,7 @@ final class NewTemplateViewModel: ObservableObject {
                 editing.description = descriptionText.isEmpty ? nil : descriptionText
                 editing.defaultDueTime = comps
                 editing.priority = priority
+                editing.labelsDefault = Array(selectedLabelIds)
                 switch endRule {
                 case .afterCount(let n): editing.endAfterCount = n
                 default: editing.endAfterCount = nil
@@ -178,7 +181,7 @@ final class NewTemplateViewModel: ObservableObject {
                         if case .onDate(let d) = endRule { return cal.startOfDay(for: d) }
                         return nil
                     }()
-                    var newSeries = Series(
+                    let newSeries = Series(
                         templateId: editing.id,
                         ownerId: userId,
                         startsOn: starts,
@@ -195,14 +198,14 @@ final class NewTemplateViewModel: ObservableObject {
                 }
                 NotificationCenter.default.post(name: Notification.Name("dm.templates.changed"), object: nil)
             } else {
-                var template = Template(ownerId: userId, name: name, description: descriptionText.isEmpty ? nil : descriptionText, defaultDueTime: comps, priority: priority, status: "active")
+                var template = Template(ownerId: userId, name: name, description: descriptionText.isEmpty ? nil : descriptionText, labelsDefault: Array(selectedLabelIds), defaultBucket: .routines, defaultDueTime: comps, priority: priority, status: "active")
                 template.updatedAt = Date()
                 try await tplUC.create(template)
                 NotificationCenter.default.post(name: Notification.Name("dm.templates.changed"), object: nil)
                 // Create Series for any frequency using rule-driven scheduling
                 let cal = Calendar.current
                 let starts = cal.startOfDay(for: startsOn)
-                var series = Series(templateId: template.id, ownerId: userId, startsOn: starts, endsOn: {
+                let series = Series(templateId: template.id, ownerId: userId, startsOn: starts, endsOn: {
                     if case .onDate(let d) = endRule { return cal.startOfDay(for: d) }
                     return nil
                 }(), timezoneIdentifier: timezoneIdentifier, status: "active", lastGeneratedAt: nil, intervalWeeks: interval, anchorWeekday: selectedWeekdays.sorted().first, rule: buildRule())
@@ -256,9 +259,55 @@ final class NewTemplateViewModel: ObservableObject {
                     try? await tasksRepo.deleteTask(by: task.id)
                 }
             }
+            if let sync = try? deps.resolve(type: SyncService.self) {
+                _Concurrency.Task { await sync.sync(for: userId) }
+            }
             NotificationCenter.default.post(name: Notification.Name("dm.templates.changed"), object: nil)
         } catch {
             Logger.shared.error("Failed to delete template and future instances", category: .ui, error: error)
+        }
+    }
+    
+    /// Deletes the template/series and removes all related tasks that are not completed (past and future)
+    func deleteTemplateAndAllIncompleteInstances() async {
+        guard let editing = editingTemplate else { return }
+        do {
+            let deps = Dependencies.shared
+            let tplUC = try deps.resolve(type: TemplatesUseCases.self)
+            // Soft-delete template locally
+            var tombstoned = editing
+            tombstoned.deletedAt = Date()
+            tombstoned.updatedAt = Date()
+            try await tplUC.update(tombstoned)
+            // Mirror soft-delete remotely for cross-device visibility
+            if let remoteTpl = try? Dependencies.shared.resolve(type: RemoteTemplatesRepository.self) {
+                try? await remoteTpl.softDelete(id: editing.id)
+            }
+            // Pause/delete series if exists
+            if var ser = existingSeries {
+                let serUC = try deps.resolve(type: SeriesUseCases.self)
+                ser.status = "paused"
+                ser.deletedAt = Date()
+                ser.updatedAt = Date()
+                try await serUC.update(ser)
+                if let remoteSer = try? Dependencies.shared.resolve(type: RemoteSeriesRepository.self) {
+                    try? await remoteSer.softDelete(id: ser.id)
+                }
+            }
+            // Delete all non-completed tasks related to this template (ignore already-deleted)
+            let tasksRepo = try deps.resolve(type: TasksRepository.self)
+            let allTasks = try await tasksRepo.fetchTasks(for: userId, in: nil)
+            for task in allTasks where task.templateId == editing.id {
+                if task.deletedAt == nil && task.isCompleted == false {
+                    try? await tasksRepo.deleteTask(by: task.id)
+                }
+            }
+            if let sync = try? deps.resolve(type: SyncService.self) {
+                _Concurrency.Task { await sync.sync(for: userId) }
+            }
+            NotificationCenter.default.post(name: Notification.Name("dm.templates.changed"), object: nil)
+        } catch {
+            Logger.shared.error("Failed to delete template and all incomplete instances", category: .ui, error: error)
         }
     }
     

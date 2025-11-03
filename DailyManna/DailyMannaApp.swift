@@ -60,6 +60,21 @@ struct DailyMannaApp: App {
             }
         }
         .modelContainer(getModelContainer())
+        #if os(macOS)
+        .commands {
+            CommandMenu("Buckets") {
+                ForEach(0..<9) { idx in
+                    Button("Focus Bucket \(idx+1)") { NotificationCenter.default.post(name: Notification.Name("dm.focus.bucket"), object: nil, userInfo: ["index": idx]) }
+                        .keyboardShortcut(KeyEquivalent(Character(String(idx+1))), modifiers: [.command])
+                }
+                Divider()
+                Button("Collapse One Step") { NotificationCenter.default.post(name: Notification.Name("dm.bucket.collapse"), object: nil) }
+                    .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+                Button("Expand One Step") { NotificationCenter.default.post(name: Notification.Name("dm.bucket.expand"), object: nil) }
+                    .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+            }
+        }
+        #endif
     }
     
     private func configureDependencies() {

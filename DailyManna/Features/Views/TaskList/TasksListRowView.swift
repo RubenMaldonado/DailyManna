@@ -86,9 +86,14 @@ struct TasksListRowView: View {
         .overlay(Rectangle().fill(Colors.onSurfaceVariant.opacity(0.06)).frame(height: 1), alignment: .bottom)
         .contextMenu {
             Button("Edit") { onEdit(task) }
-            Menu("Move to") {
-                ForEach(TimeBucket.allCases.sorted { $0.sortOrder < $1.sortOrder }) { bucket in
-                    Button(bucket.displayName) { onMove(task.id, bucket) }
+            if task.templateId != nil, task.parentTaskId != nil {
+                Button("Edit Template to Reschedule") { onEdit(task) }
+                    .disabled(true)
+            } else {
+                Menu("Move to") {
+                    ForEach(TimeBucket.allCases.sorted { $0.sortOrder < $1.sortOrder }) { bucket in
+                        Button(bucket.displayName) { onMove(task.id, bucket) }
+                    }
                 }
             }
             if task.templateId != nil {
@@ -96,12 +101,10 @@ struct TasksListRowView: View {
                     Button("Make Exception: Title") { _Concurrency.Task { await viewModel.makeException(taskId: task.id, field: "title") } }
                     Button("Make Exception: Description") { _Concurrency.Task { await viewModel.makeException(taskId: task.id, field: "description") } }
                     Button("Make Exception: Labels") { _Concurrency.Task { await viewModel.makeException(taskId: task.id, field: "labels") } }
-                    Button("Make Exception: Bucket") { _Concurrency.Task { await viewModel.makeException(taskId: task.id, field: "bucket") } }
                     Divider()
                     Button("Reapply Template: Title") { _Concurrency.Task { await viewModel.reapplyTemplate(taskId: task.id, field: "title") } }
                     Button("Reapply Template: Description") { _Concurrency.Task { await viewModel.reapplyTemplate(taskId: task.id, field: "description") } }
                     Button("Reapply Template: Labels") { _Concurrency.Task { await viewModel.reapplyTemplate(taskId: task.id, field: "labels") } }
-                    Button("Reapply Template: Bucket") { _Concurrency.Task { await viewModel.reapplyTemplate(taskId: task.id, field: "bucket") } }
                 }
             }
             Button(role: .destructive) { onDelete(task) } label: { Text("Delete") }

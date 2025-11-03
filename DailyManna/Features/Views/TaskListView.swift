@@ -179,7 +179,8 @@ struct TaskListView: View {
                     let md = WorkingLogMarkdownExporter.generate(
                         rangeStart: workingLogVM.dateRange.start,
                         rangeEnd: workingLogVM.dateRange.end,
-                        itemsByDay: workingLogVM.itemsByDay
+                        itemsByDay: workingLogVM.itemsByDay,
+                        labelsByTaskId: workingLogVM.labelsByTaskId
                     )
                     let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
                     let name = "Working-Log_\(f.string(from: workingLogVM.dateRange.start))_to_\(f.string(from: workingLogVM.dateRange.end)).md"

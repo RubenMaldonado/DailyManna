@@ -1,7 +1,12 @@
 import Foundation
 
 enum WorkingLogMarkdownExporter {
-    static func generate(rangeStart: Date, rangeEnd: Date, itemsByDay: [(day: Date, tasks: [Task], notes: [WorkingLogItem])]) -> String {
+    static func generate(
+        rangeStart: Date,
+        rangeEnd: Date,
+        itemsByDay: [(day: Date, tasks: [Task], notes: [WorkingLogItem])],
+        labelsByTaskId: [UUID: [Label]] = [:]
+    ) -> String {
         var lines: [String] = []
         let headerFmt = DateFormatter()
         headerFmt.dateFormat = "MMM dd, yyyy"
@@ -11,6 +16,8 @@ enum WorkingLogMarkdownExporter {
         dayFmt.dateFormat = "EEE, MMM d"
         let timeFmt = DateFormatter()
         timeFmt.dateFormat = "HH:mm"
+        let dateTimeFmt = DateFormatter()
+        dateTimeFmt.dateFormat = "MMM d, yyyy HH:mm"
         for (day, tasks, notes) in itemsByDay {
             lines.append("## \(dayFmt.string(from: day))")
             if !tasks.isEmpty {
@@ -18,6 +25,21 @@ enum WorkingLogMarkdownExporter {
                 for t in tasks.sorted(by: { ($0.completedAt ?? Date.distantPast) > ($1.completedAt ?? Date.distantPast) }) {
                     let ts = t.completedAt != nil ? timeFmt.string(from: t.completedAt!) : "--:--"
                     lines.append("- [\(ts)] \(t.title)")
+                    var meta: [String] = []
+                    if let desc = t.description?.trimmingCharacters(in: .whitespacesAndNewlines), desc.isEmpty == false {
+                        meta.append("Description: \(desc)")
+                    }
+                    let labels = (labelsByTaskId[t.id] ?? []).map { $0.name }.sorted()
+                    if labels.isEmpty == false {
+                        meta.append("Labels: \(labels.joined(separator: ", "))")
+                    }
+                    meta.append("Created: \(dateTimeFmt.string(from: t.createdAt))")
+                    if let completed = t.completedAt {
+                        meta.append("Completed: \(dateTimeFmt.string(from: completed))")
+                    }
+                    for m in meta {
+                        lines.append("  - \(m)")
+                    }
                 }
             }
             if !notes.isEmpty {

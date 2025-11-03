@@ -260,7 +260,12 @@ struct WorkingLogPanelView: View {
                     // Export actions
                     Section("Export") {
                         Button("Save Markdown As…") {
-                            let md = WorkingLogMarkdownExporter.generate(rangeStart: viewModel.dateRange.start, rangeEnd: viewModel.dateRange.end, itemsByDay: viewModel.itemsByDay)
+                            let md = WorkingLogMarkdownExporter.generate(
+                                rangeStart: viewModel.dateRange.start,
+                                rangeEnd: viewModel.dateRange.end,
+                                itemsByDay: viewModel.itemsByDay,
+                                labelsByTaskId: viewModel.labelsByTaskId
+                            )
                             let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
                             let suggested = "Working-Log_\(f.string(from: viewModel.dateRange.start))_to_\(f.string(from: viewModel.dateRange.end)).md"
                             #if os(macOS)
@@ -284,7 +289,12 @@ struct WorkingLogPanelView: View {
                             #endif
                         }
                         Button("Copy Markdown") {
-                            let md = WorkingLogMarkdownExporter.generate(rangeStart: viewModel.dateRange.start, rangeEnd: viewModel.dateRange.end, itemsByDay: viewModel.itemsByDay)
+                            let md = WorkingLogMarkdownExporter.generate(
+                                rangeStart: viewModel.dateRange.start,
+                                rangeEnd: viewModel.dateRange.end,
+                                itemsByDay: viewModel.itemsByDay,
+                                labelsByTaskId: viewModel.labelsByTaskId
+                            )
                             #if os(macOS)
                             let pb = NSPasteboard.general
                             pb.clearContents()

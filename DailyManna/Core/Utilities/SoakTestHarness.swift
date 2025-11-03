@@ -86,7 +86,9 @@ final class SoakTestHarness: ObservableObject {
 
     private func moveRandomTask() async {
         guard let pairs = try? await taskUseCases.fetchTasksWithLabels(for: userId, in: nil), pairs.isEmpty == false else { return }
-        let incomplete = pairs.map { $0.0 }.filter { $0.isCompleted == false }
+        let incomplete = pairs.map { $0.0 }.filter { task in
+            task.isCompleted == false && (task.templateId == nil || task.parentTaskId == nil)
+        }
         guard let pick = incomplete.randomElement() else { return }
         let newBucket = randomBucket()
         if newBucket != pick.bucketKey {

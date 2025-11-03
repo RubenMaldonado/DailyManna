@@ -70,9 +70,7 @@ final class SettingsViewModel: ObservableObject {
                 }
             }
 
-            // Duplicate roots by templateId (keep oldest per template)
-            let groupsByTemplate: [UUID: [Task]] = Dictionary(uniqueKeysWithValues: groupsByTitle.flatMap { _ in [] }) // shim to satisfy compiler
-            // Build template groups separately to avoid Optional key
+            // Duplicate roots by templateId (keep oldest per template). Build groups separately to avoid Optional key
             var templateGroups: [UUID: [Task]] = [:]
             for t in routinesRoots {
                 if let tid = t.templateId { templateGroups[tid, default: []].append(t) }

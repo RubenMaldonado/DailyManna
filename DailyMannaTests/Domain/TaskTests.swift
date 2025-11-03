@@ -45,6 +45,36 @@ final class TaskTests: XCTestCase {
         XCTAssertEqual(fetchedNextWeek.count, 1)
     }
 
+    func testMoveTemplateTaskBetweenBucketsIsRejected() async throws {
+        let userId = TestFactories.userId(21)
+        let data = try DataContainer.test()
+        let useCases = TaskUseCases(tasksRepository: data.tasksRepository, labelsRepository: data.labelsRepository)
+
+        let templateId = UUID()
+        var root = TestFactories.task(id: templateId, userId: userId, bucket: .routines, title: "Template Root")
+        root.templateId = templateId
+        root.parentTaskId = nil
+        try await useCases.createTask(root)
+
+        let cal = Calendar.current
+        let due = cal.date(byAdding: .day, value: 3, to: Date()) ?? Date()
+        var occurrence = TestFactories.task(userId: userId, bucket: .routines, title: "From Template")
+        occurrence.templateId = templateId
+        occurrence.parentTaskId = templateId
+        occurrence.dueAt = due
+        occurrence.occurrenceDate = cal.startOfDay(for: due)
+        try await useCases.createTask(occurrence)
+
+        do {
+            try await useCases.moveTask(id: occurrence.id, to: .nextWeek, for: userId)
+            XCTFail("Expected template move to be rejected")
+        } catch DomainError.invalidOperation(let message) {
+            XCTAssertTrue(message.contains("template"))
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     func testCountsExcludeCompletedByDefault() async throws {
         let userId = TestFactories.userId(12)
         let data = try DataContainer.test()

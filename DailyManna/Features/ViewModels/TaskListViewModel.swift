@@ -915,6 +915,13 @@ final class TaskListViewModel: ObservableObject {
 
     /// Move task and refresh using a specific filter. Pass `nil` to refresh all buckets (board view).
     func move(taskId: UUID, to bucket: TimeBucket, refreshIn filter: TimeBucket?) async {
+        if let idx = tasksWithLabels.firstIndex(where: { $0.0.id == taskId }) {
+            let task = tasksWithLabels[idx].0
+            if task.templateId != nil, task.parentTaskId != nil, bucket != task.bucketKey {
+                errorMessage = "Template tasks move automatically. Edit the template to change its schedule."
+                return
+            }
+        }
         do {
             _ = try await Logger.shared.time("reorderCommit_move", category: .perf) {
                 try await taskUseCases.moveTask(id: taskId, to: bucket, for: userId)
@@ -932,7 +939,11 @@ final class TaskListViewModel: ObservableObject {
             await refreshCounts()
             await fetchTasks(in: nil)
         } catch {
-            errorMessage = "Failed to move task: \(error.localizedDescription)"
+            if let domainError = error as? DomainError {
+                errorMessage = domainError.errorDescription
+            } else {
+                errorMessage = "Failed to move task: \(error.localizedDescription)"
+            }
             Logger.shared.error("Failed to move task", category: .ui, error: error)
         }
     }
@@ -993,6 +1004,10 @@ final class TaskListViewModel: ObservableObject {
         guard let movingGlobalIdx = current.firstIndex(where: { $0.0.id == taskId }) else { return }
         let movingPair = current[movingGlobalIdx]
         // movingTask reference not needed; we use movingPair directly
+        if movingPair.0.templateId != nil, movingPair.0.parentTaskId != nil, bucket != movingPair.0.bucketKey {
+            errorMessage = "Template tasks move automatically. Edit the template to change its schedule."
+            return
+        }
 
         let destCandidates = current.filter { $0.0.bucketKey == bucket && $0.0.isCompleted == false && $0.0.id != taskId }
         let destArr = canonicalSorted(destCandidates)
@@ -1049,7 +1064,11 @@ final class TaskListViewModel: ObservableObject {
                 try await taskUseCases.updateTaskOrderAndBucket(id: taskId, to: bucket, position: newPos, userId: userId)
             }
         } catch {
-            errorMessage = "Failed to reorder: \(error.localizedDescription)"
+            if let domainError = error as? DomainError {
+                errorMessage = domainError.errorDescription
+            } else {
+                errorMessage = "Failed to reorder: \(error.localizedDescription)"
+            }
             Logger.shared.error("Failed to reorder task", category: .ui, error: error)
         }
     }
@@ -1101,7 +1120,9 @@ final class TaskListViewModel: ObservableObject {
                 let start = cal.startOfDay(for: due)
                 if start >= weekMon && start <= weekSun {
                     // Persist move so counts and future fetches are correct
-                    do { try await taskUseCases.moveTask(id: t.id, to: .thisWeek, for: userId) } catch { }
+                    do {
+                        try await taskUseCases.moveTask(id: t.id, to: .thisWeek, for: userId, allowTemplateBucketMutation: true)
+                    } catch { }
                     var updated = t; updated.bucketKey = .thisWeek
                     tasksWithLabels[i].0 = updated
                     changed = true
@@ -1189,6 +1210,10 @@ final class TaskListViewModel: ObservableObject {
     func schedule(taskId: UUID, to targetDate: Date) async {
         guard let idx = tasksWithLabels.firstIndex(where: { $0.0.id == taskId }) else { return }
         var task = tasksWithLabels[idx].0
+        if task.templateId != nil, task.parentTaskId != nil {
+            errorMessage = "Template tasks move automatically. Edit the template to change its schedule."
+            return
+        }
         let cal = Calendar.current
         let wasDueTime = task.dueHasTime
         if wasDueTime, let currentDue = task.dueAt {
@@ -1221,6 +1246,10 @@ final class TaskListViewModel: ObservableObject {
     func unschedule(taskId: UUID) async {
         guard let idx = tasksWithLabels.firstIndex(where: { $0.0.id == taskId }) else { return }
         var task = tasksWithLabels[idx].0
+        if task.templateId != nil, task.parentTaskId != nil {
+            errorMessage = "Template tasks move automatically. Edit the template to change its schedule."
+            return
+        }
         task.dueAt = nil
         task.dueHasTime = false
         do {

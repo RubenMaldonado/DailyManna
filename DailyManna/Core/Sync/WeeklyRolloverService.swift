@@ -71,7 +71,7 @@ struct WeeklyRolloverService {
             var didAnyMove = false
             for (idx, task) in candidates.enumerated() {
                 let newPos = basePos + stride * Double(idx + 1)
-                try await taskUC.updateTaskOrderAndBucket(id: task.id, to: .nextWeek, position: newPos, userId: userId)
+                try await taskUC.updateTaskOrderAndBucket(id: task.id, to: .nextWeek, position: newPos, userId: userId, allowTemplateBucketMutation: true)
                 didAnyMove = true
             }
             

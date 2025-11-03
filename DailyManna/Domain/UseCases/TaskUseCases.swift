@@ -113,9 +113,12 @@ public final class TaskUseCases {
     }
     
     /// Moves a task to a different time bucket
-    public func moveTask(id: UUID, to newBucket: TimeBucket, for userId: UUID) async throws {
+    public func moveTask(id: UUID, to newBucket: TimeBucket, for userId: UUID, allowTemplateBucketMutation: Bool = false) async throws {
         guard var task = try await tasksRepository.fetchTask(by: id) else {
             throw DomainError.notFound(id.uuidString)
+        }
+        if task.parentTaskId != nil, task.templateId != nil, newBucket != task.bucketKey, allowTemplateBucketMutation == false {
+            throw DomainError.invalidOperation("This task comes from a template. Edit the template to change its schedule.")
         }
         task.bucketKey = newBucket
         // Default to append at bottom if position will be assigned later by caller
@@ -125,9 +128,12 @@ public final class TaskUseCases {
     }
 
     /// Update only ordering and bucket in one step.
-    public func updateTaskOrderAndBucket(id: UUID, to newBucket: TimeBucket, position: Double, userId: UUID) async throws {
+    public func updateTaskOrderAndBucket(id: UUID, to newBucket: TimeBucket, position: Double, userId: UUID, allowTemplateBucketMutation: Bool = false) async throws {
         guard var task = try await tasksRepository.fetchTask(by: id) else {
             throw DomainError.notFound(id.uuidString)
+        }
+        if task.parentTaskId != nil, task.templateId != nil, newBucket != task.bucketKey, allowTemplateBucketMutation == false {
+            throw DomainError.invalidOperation("This task comes from a template. Edit the template to change its schedule.")
         }
         task.bucketKey = newBucket
         task.position = position
