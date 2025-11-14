@@ -114,10 +114,15 @@ struct LabelMultiSelectSheet: View {
                         .onTapGesture { createColor = hex }
                 }
                 Spacer()
-                Button("Cancel") { cancelCreate() }
-                    .buttonStyle(SecondaryButtonStyle(size: .small))
-                Button("Create") { _Concurrency.Task { await performCreate() } }
-                    .buttonStyle(PrimaryButtonStyle(size: .small))
+                Button(action: { cancelCreate() }) {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(IconButtonStyle())
+                .accessibilityLabel("Cancel")
+                Button(action: { _Concurrency.Task { await performCreate() } }) {
+                    Image(systemName: "checkmark")
+                }
+                .buttonStyle(IconButtonStyle())
                     .disabled(createDisabled)
             }
             if let error = errorText { Text(error).style(Typography.caption).foregroundColor(Colors.onSurfaceVariant) }
