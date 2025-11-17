@@ -244,7 +244,11 @@ struct InlineBoardView: View {
                         // Add resize handle after every column, including the last one,
                         // so users can resize the trailing column (e.g., Routines/Templates)
                         ColumnResizeHandle(
-                            onBegin: { cachedEffectiveByBucket = computed; resizingBucketKey = bucket.rawValue },
+                            onBegin: {
+                                cachedEffectiveByBucket = computed
+                                resizingBucketKey = bucket.rawValue
+                                userWidthByBucket[bucket.rawValue] = chosenWidth
+                            },
                             onDrag: { delta in withAnimation(.interactiveSpring(response: 0.25, dampingFraction: 0.88)) { adjustWidth(for: bucket, by: delta) } },
                             onEnd: { withAnimation(.easeOut(duration: 0.18)) { persistUserWidth(for: bucket); resizingBucketKey = nil; cachedEffectiveByBucket = computed } }
                         )
@@ -357,18 +361,28 @@ extension InlineBoardView {
         default: return BoardMetrics.expandedWidth
         }
     }
+    private func clampWidth(_ width: CGFloat) -> CGFloat {
+        max(220, min(560, width))
+    }
     private func widthFor(bucket: TimeBucket, effectiveMode: String?) -> CGFloat {
         let key = bucket.rawValue
         // Prefer in-memory width while dragging or after prior adjustments
-        if let w = userWidthByBucket[key] { return max(220, min(560, w)) }
+        if let w = userWidthByBucket[key] { return clampWidth(w) }
         // Otherwise, read persisted width without mutating state during render
-        if let saved = loadUserWidth(for: bucket) { return max(220, min(560, saved)) }
-        return defaultWidth(for: effectiveMode)
+        if let saved = loadUserWidth(for: bucket) { return clampWidth(saved) }
+        return clampWidth(defaultWidth(for: effectiveMode))
     }
     private func adjustWidth(for bucket: TimeBucket, by delta: CGFloat) {
         let key = bucket.rawValue
-        let current = userWidthByBucket[key] ?? defaultWidth(for: preferredMode(bucket))
-        userWidthByBucket[key] = max(220, min(560, current + delta))
+        let current: CGFloat
+        if let inMemory = userWidthByBucket[key] {
+            current = inMemory
+        } else if let persisted = loadUserWidth(for: bucket) {
+            current = persisted
+        } else {
+            current = defaultWidth(for: preferredMode(bucket))
+        }
+        userWidthByBucket[key] = clampWidth(current + delta)
     }
     private func persistUserWidth(for bucket: TimeBucket) {
         let key = bucket.rawValue
